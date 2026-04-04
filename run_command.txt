@@ -24,6 +24,16 @@ mkdir -p output/SOPMOA
   --timelimit 2 \
   -n 4
 
+# Single-query SOPMOA_relaxed smoke test on the same query.
+./Release/main \
+  -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
+  -s 88959 \
+  -t 96072 \
+  -o output/sopmoa_relaxed_smoke.csv \
+  -a SOPMOA_relaxed \
+  --timelimit 2 \
+  -n 4
+
 # Scenario-based SOPMOA run for the first query in scen/query3.json.
 ./Release/main \
   -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
@@ -37,7 +47,7 @@ mkdir -p output/SOPMOA
   -n 4
 
 # Local comparison benchmark used in README.md.
-for ALG in SOPMOA LTMOA LazyLTMOA LTMOA_array LazyLTMOA_array EMOA NWMOA; do
+for ALG in SOPMOA SOPMOA_relaxed LTMOA LazyLTMOA LTMOA_array LazyLTMOA_array EMOA NWMOA; do
   ./Release/main \
     -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
     -s 88959 \
@@ -46,6 +56,20 @@ for ALG in SOPMOA LTMOA LazyLTMOA LTMOA_array LazyLTMOA_array EMOA NWMOA; do
     -a "$ALG" \
     --timelimit 2 \
     -n 4
+done
+
+# 5-run comparison used to validate SOPMOA_relaxed.
+for ALG in SOPMOA LTMOA SOPMOA_relaxed; do
+  for RUN in 1 2 3 4 5; do
+    ./Release/main \
+      -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
+      -s 88959 \
+      -t 96072 \
+      -o "output/bench/${ALG}-${RUN}.csv" \
+      -a "$ALG" \
+      --timelimit 2 \
+      -n 4
+  done
 done
 
 # Optional: inspect the benchmark CSV files.

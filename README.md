@@ -13,6 +13,7 @@ SOPMOA* is a C++17 codebase for exact multi-objective shortest-path (MOSP) searc
 ## Implemented Solvers
 
 - `SOPMOA`
+- `SOPMOA_relaxed`
 - `SOPMOA_bucket`
 - `LTMOA`
 - `LazyLTMOA`
@@ -86,7 +87,7 @@ cmake --build Release -j
 The current binary exposes these options:
 
 - `-m, --map <file1> [file2 ...]`: weight files, one file per objective
-- `-a, --algorithm <NAME>`: `SOPMOA | SOPMOA_bucket | LTMOA | LazyLTMOA | LTMOA_array | LazyLTMOA_array | EMOA | NWMOA`
+- `-a, --algorithm <NAME>`: `SOPMOA | SOPMOA_relaxed | SOPMOA_bucket | LTMOA | LazyLTMOA | LTMOA_array | LazyLTMOA_array | EMOA | NWMOA`
 - `-s, --start <node>`: single-query start node
 - `-t, --target <node>`: single-query target node
 - `--scenario <file.json>`: batch queries from a scenario JSON file
@@ -94,11 +95,12 @@ The current binary exposes these options:
 - `-o, --output <file.csv>`: required output CSV path
 - `--logsols <dir>`: optional directory for dumping solution fronts
 - `--timelimit <seconds>`: requested per-query time limit
-- `-n, --numthreads <N>`: used by `SOPMOA` and `SOPMOA_bucket`
+- `-n, --numthreads <N>`: used by `SOPMOA`, `SOPMOA_relaxed`, and `SOPMOA_bucket`
 
 Threading note:
 
 - `SOPMOA` currently clamps `-n` to at most `12` threads.
+- `SOPMOA_relaxed` uses the requested `-n` directly.
 - `SOPMOA_bucket` currently clamps `-n` to at most `16` threads.
 - The other solvers ignore `-n` in the current CLI.
 
@@ -204,8 +206,8 @@ Benchmark setup:
 Important caveats:
 
 - This is a local smoke benchmark, not a publication-grade evaluation.
-- Several baseline solvers exceeded the requested 2-second budget before their next termination check, so their recorded wall times are closer to `3.5-4.2s`.
-- `SOPMOA` is the only solver in the table below that actually uses the `-n 4` setting.
+- Several baseline solvers exceeded the requested 2-second budget before their next termination check, so their recorded wall times are closer to `3.4-4.3s`.
+- `SOPMOA` and `SOPMOA_relaxed` are the only solvers in the tables below that actually use the `-n 4` setting.
 
 Reproduction command:
 
@@ -224,11 +226,43 @@ for ALG in SOPMOA LTMOA LazyLTMOA LTMOA_array LazyLTMOA_array EMOA NWMOA; do
 done
 ```
 
+`SOPMOA_relaxed` 5-run comparison used for the new solver validation:
+
+```bash
+for ALG in SOPMOA LTMOA SOPMOA_relaxed; do
+  for RUN in 1 2 3 4 5; do
+    ./Release/main \
+      -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
+      -s 88959 \
+      -t 96072 \
+      -o "output/bench/${ALG}-${RUN}.csv" \
+      -a "$ALG" \
+      --timelimit 2 \
+      -n 4
+  done
+done
+```
+
+Median over 5 runs on this machine:
+
+| Algorithm | Threads used | Median runtime (s) | Avg runtime (s) | Representative solutions |
+| --- | ---: | ---: | ---: | ---: |
+| `SOPMOA_relaxed` | 4 | 2.00048 | 2.00055 | 1,429 |
+| `SOPMOA` | 4 | 2.00418 | 2.00490 | 400 |
+| `LTMOA` | 1 | 3.47814 | 3.76170 | 876 |
+
+Observed locally for the new solver:
+
+- `SOPMOA_relaxed` matched `LTMOA` exactly on synthetic 2/3/4-objective test graphs for both `-n 1` and `-n 4`.
+- On the NYC benchmark above, `SOPMOA_relaxed` beat `LTMOA` on median wall-clock and processed substantially more labels within the same 2-second budget.
+- Compared with the original `SOPMOA`, `SOPMOA_relaxed` stayed on budget while expanding roughly `5-6x` more labels in the same setup.
+
 Measured results on this machine:
 
 | Algorithm | Threads used | Runtime (s) | Generated | Expanded | Solutions |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `SOPMOA` | 4 | 2.00611 | 105,082 | 102,946 | 380 |
+| `SOPMOA_relaxed` | 4 | 2.00048 median over 5 runs | about 699,497 avg generated | about 657,426 avg expanded | about 1,395 avg |
 | `LTMOA` | 1 | 3.46159 | 317,047 | 303,935 | 932 |
 | `LazyLTMOA` | 1 | 3.87518 | 455,678 | 304,071 | 932 |
 | `LTMOA_array` | 1 | 3.51381 | 1,074,754 | 982,023 | 1,936 |
@@ -238,8 +272,8 @@ Measured results on this machine:
 
 Observed locally:
 
-- `LTMOA_array` produced the largest number of solutions in this short run.
-- `SOPMOA` stayed closest to the requested wall-clock budget and expanded far fewer labels than the serial baselines in this specific setup.
+- `LTMOA_array` produced the largest number of solutions in the one-shot serial comparison.
+- `SOPMOA_relaxed` achieved the best wall-clock among the exact solvers tested repeatedly in the new 5-run comparison.
 - `SOPMOA_bucket` was not included in the table because it aborted locally with exit code `134` and produced no CSV output on the same query.
 
 ## Project Layout
