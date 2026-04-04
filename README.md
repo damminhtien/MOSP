@@ -6,303 +6,279 @@
 [![oneTBB](https://img.shields.io/badge/oneTBB-enabled-brightgreen.svg)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-orange.svg)](#license)
 
-**SOPMOA*** is a high-performance framework for exact multi-objective shortest-path (MOSP) search on large graphs. It uses a shared concurrent OPEN with per-node Pareto sets, lightweight dominance checks, and a thread-safe update protocol to scale across many cores.
+SOPMOA* is a C++17 codebase for exact multi-objective shortest-path (MOSP) search on large graphs. The repository contains the parallel SOPMOA family together with several exact baseline solvers used for comparison.
 
 ![image](sopmoa_flow.png)
 
-The repository bundles a suite of exact MOSP solvers:
+## Implemented Solvers
 
-* SOPMOA* (this work) and SOPMOA*-bucket: 
-* LTMOA* (+ array & lazy variants) [1]
-* EMOA* [2]
-* NWMOA* [3]
-* BOA* [4]
+- `SOPMOA`
+- `SOPMOA_bucket`
+- `LTMOA`
+- `LazyLTMOA`
+- `LTMOA_array`
+- `LazyLTMOA_array`
+- `EMOA`
+- `NWMOA`
 
-[1] C. Hern´andez et al., “Multi-objective Search via Lazy and Efﬁcient Dominance Checks,” Aug. 2023. Accessed: Nov. 07, 2023. [Online].
+## Requirements
 
-[2] Z. Ren, R. Zhan, S. Rathinam, M. Likhachev, and H. Choset, “(EMOA*) Enhanced Multi-Objective A* Using Balanced Binary Search Trees,” SOCS, vol. 15, no. 1, pp. 162–170, Jul. 2022, doi: 10.1609/socs.v15i1.21764.
+- CMake 3.16+
+- A C++17 compiler
+- Boost `program_options`
+- OpenMP
+- oneTBB
 
-[3] S. Ahmadi, N. Sturtevant, D. Harabor, and M. Jalili, “(NWMOA*) Exact Multi-objective Path Finding with Negative Weights,” Proceedings of the International Conference on Automated Planning and Scheduling, vol. 34, pp. 11–19, May 2024, doi: 10.1609/icaps.v34i1.31455.
+### macOS (verified locally on April 4, 2026)
 
-[4] C. Hernández et al., “(BOA* and BOD) Simple and efficient bi-objective search algorithms via fast dominance checks,” Artificial Intelligence, vol. 314, p. 103807, Jan. 2023, doi: 10.1016/j.artint.2022.103807.
-
-### Features
-
-* **Exact Pareto-optimal search** for 3–4 objectives on road-like graphs
-* **Parallel**: shared concurrent priority queue + per-node locked Pareto sets
-* **Pluggable algorithms**: SOPMOA*, LTMOA*, EMOA*, NWMOA, BOA*, ABOA*
-* **Scenario runner**: batch queries from JSON, wall-time limits, logging
-* **Reproducible**: CSV logs, deterministic seeds, hardware/threads control
-
-
-
-### Quick start
+Install the dependencies used for the local run in this repository:
 
 ```bash
-# 1) Build (Release)
-mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build . -j
-
-# 2) Run a demo (replace with your actual files)
-./main \
-  -m maps/NY-d.txt maps/NY-t.txt maps/NY-c.txt \
-  --alg SOPMOA \
-  --scenario scen/good.json \
-  --timelimit 3600 \
-  --threads 16 \
-  --outdir out/sopmoa \
-  --logcsv out/sopmoa/results.csv \
-  --logsols out/sopmoa/solutions \
-  --seed 42
+brew install cmake boost tbb libomp
 ```
 
-> Tip: `./main --help` prints the exact option names supported by your build.
+Verified local environment:
 
+- `macOS 26.3.1 (build 25D771280a)`
+- `x86_64`
+- `Intel(R) Core(TM) i7-1068NG7 CPU @ 2.30GHz`
+- `Apple clang 17.0.0`
+- `cmake 4.3.1`
+- `boost 1.90.0_1`
+- `tbb 2022.3.0`
+- `libomp 22.1.2`
 
-
-### Requirements
-
-* **OS**: Ubuntu 22.04+/Debian 12+, or macOS 14+ (Apple Silicon or x86_64)
-* **Toolchain**: CMake ≥ 3.16, **g++ ≥ 11** (or Clang ≥ 14), C++17
-* **Libraries**:
-
-  * **Boost**: `program_options`, `filesystem`, `system`, `thread`, `log`
-  * **OpenMP** (runtime + headers)
-  * **oneTBB** (Threading Building Blocks)
-
-#### Ubuntu/Debian
+### Ubuntu/Debian
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential cmake \
-  libboost-all-dev libomp-dev libtbb-dev
+sudo apt install -y build-essential cmake libboost-program-options-dev libomp-dev libtbb-dev
 ```
 
-#### macOS (Homebrew)
+## Build
+
+Use a fresh build directory such as `Release/`. The checked-in `build/` directory contains stale machine-specific CMake cache from another environment and should not be reused as-is.
+
+### macOS / Homebrew
 
 ```bash
-brew install cmake boost llvm tbb
-# If using Apple Clang, OpenMP comes via llvm:
-echo 'export CC=/opt/homebrew/opt/llvm/bin/clang'   >> ~/.zshrc
-echo 'export CXX=/opt/homebrew/opt/llvm/bin/clang++'>> ~/.zshrc
-echo 'export LDFLAGS="-L/opt/homebrew/opt/llvm/lib"'>> ~/.zshrc
-echo 'export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"'>> ~/.zshrc
+PREFIXES="$(brew --prefix boost);$(brew --prefix tbb);$(brew --prefix libomp)"
+
+cmake -S . -B Release \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH="$PREFIXES" \
+  -DOpenMP_ROOT="$(brew --prefix libomp)"
+
+cmake --build Release -j
+./Release/main --help
 ```
 
-
-
-### Build
+### Linux
 
 ```bash
-mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build . -j
-# Optional: run a quick smoke test
-./main --help
+cmake -S . -B Release -DCMAKE_BUILD_TYPE=Release
+cmake --build Release -j
+./Release/main --help
 ```
 
-> **Tip:** Avoid hard-coding `/usr/bin/g++`; let CMake detect your toolchain.
+## CLI Summary
 
+The current binary exposes these options:
 
+- `-m, --map <file1> [file2 ...]`: weight files, one file per objective
+- `-a, --algorithm <NAME>`: `SOPMOA | SOPMOA_bucket | LTMOA | LazyLTMOA | LTMOA_array | LazyLTMOA_array | EMOA | NWMOA`
+- `-s, --start <node>`: single-query start node
+- `-t, --target <node>`: single-query target node
+- `--scenario <file.json>`: batch queries from a scenario JSON file
+- `--from <i>` / `--to <j>`: slice the scenario range
+- `-o, --output <file.csv>`: required output CSV path
+- `--logsols <dir>`: optional directory for dumping solution fronts
+- `--timelimit <seconds>`: requested per-query time limit
+- `-n, --numthreads <N>`: used by `SOPMOA` and `SOPMOA_bucket`
 
-### Data & scenarios
+Threading note:
 
-#### Graph & weight files
+- `SOPMOA` currently clamps `-n` to at most `12` threads.
+- `SOPMOA_bucket` currently clamps `-n` to at most `16` threads.
+- The other solvers ignore `-n` in the current CLI.
 
-Each objective is provided as a separate weight file over the same graph. A typical **edge list** format is:
+## Quick Start
 
+Create a local output directory and run a single 3-objective query:
+
+```bash
+mkdir -p output
+
+./Release/main \
+  -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
+  -s 88959 \
+  -t 96072 \
+  -o output/sopmoa_smoke.csv \
+  -a SOPMOA \
+  --timelimit 2 \
+  -n 4
 ```
-# Optional comments begin with '#'
-<from> <to> <w>           # single-objective, or
-<from> <to> <w1> <w2> ... # multi-objective per line (alt. format)
+
+Run the first query from a scenario file and dump the Pareto front:
+
+```bash
+mkdir -p output/SOPMOA
+
+./Release/main \
+  -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
+  --scenario scen/query3.json \
+  --from 0 \
+  --to 1 \
+  -o output/sopmoa_query3.csv \
+  --logsols output/SOPMOA \
+  -a SOPMOA \
+  --timelimit 2 \
+  -n 4
 ```
 
-In this repository, MOSP commonly uses **one file per objective**, e.g.:
+## Input Data
 
+### Graph Files
+
+The loader expects DIMACS-style arc files:
+
+```text
+c optional comment
+a <from> <to> <weight>
 ```
-maps/NY-d.txt   # objective 1: distance
-maps/NY-t.txt   # objective 2: travel time
-maps/NY-c.txt   # objective 3: cost (or risk)
-```
 
-> See the `maps/` folder for concrete samples used in our experiments.
+When you provide multiple map files, they must contain the same edge list in the same order. The loader aligns objective values by edge position and checks that each `(from, to)` pair matches across files.
 
-#### Scenario JSON
+Example map files in this repository:
 
-Batch queries are defined in a JSON array:
+- `maps/NY-d.txt`
+- `maps/NY-t.txt`
+- `maps/NY-m.txt`
+- `maps/NY-r.txt`
+- `maps/NY-l.txt`
+
+### Scenario JSON
+
+Scenario files are JSON arrays of objects with `name`, `start_data`, and `end_data`:
 
 ```json
 [
-  { "name": "q001", "start_data": 96000, "end_data": 38000 },
-  { "name": "q002", "start_data": 112233, "end_data": 445566 }
+  { "name": "query3_1", "start_data": 88959, "end_data": 96072 },
+  { "name": "query3_2", "start_data": 172570, "end_data": 197762 }
 ]
 ```
 
-Place your scenarios in `scen/` and pass via `--scenario`.
+## Output Format
 
+The current CSV output format is:
 
-
-### Usage
-
-**Common options** (final names may differ; check `--help`):
-
-```
--m,  --maps <file1> [file2 file3 ...]   Weight files (one per objective)
--a,  --alg  <NAME>                      SOPMOA | SOPMOA_bucket | LTMOA | LazyLTMOA | EMOA | NWMOA | BOA | ABOA
--s,  --scenario <file.json>             Batch of queries (start/end ids)
--q,  --query <u v>                      Single query override (no scenario)
--t,  --threads <N>                      Number of worker threads
-     --timelimit <sec>                  Wall-clock time limit per query
-     --seed <int>                       RNG seed (for sampling, tie-breaking)
-     --outdir <dir>                     Directory for logs/solutions
-     --logcsv <file.csv>                CSV summary of runs
-     --logsols <dir>                    Dump Pareto fronts per query
-     --loglevel <trace|debug|info|warn|error>
+```text
+solver_name,start,target,generated,expanded,num_solutions,runtime_sec
 ```
 
-**Algorithm-specific knobs** (enabled only for relevant solvers):
+Example:
 
-```
-# SOPMOA*
-     --bucket-width <W>                 (for SOPMOA_bucket)
-     --pq <shared|multi>                queue strategy (if compiled)
-     --strict-dominance                 use strict instead of weak
-
-# LTMOA variants
-     --lazy                             enable lazy update variant
-     --array                            array-based container for fronts
+```text
+SOPMOA(3obj|4threads)-custom_list,88959,96072,105082,102946,380,2.00611
 ```
 
-**Examples**
+If `--logsols` is enabled, each solution file contains one Pareto vector per line:
 
-Run SOPMOA* on 3-objective NYC graph, 1-hour limit, 16 threads:
+```text
+[12,45,78]
+[13,43,81]
+```
+
+## Local Benchmark On April 4, 2026
+
+The commands used below are also mirrored in `run_command.txt`.
+
+Benchmark setup:
+
+- binary: `./Release/main`
+- maps: `maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt`
+- query: `start=88959`, `target=96072`
+- requested budget: `--timelimit 2`
+- thread flag: `-n 4`
+
+Important caveats:
+
+- This is a local smoke benchmark, not a publication-grade evaluation.
+- Several baseline solvers exceeded the requested 2-second budget before their next termination check, so their recorded wall times are closer to `3.5-4.2s`.
+- `SOPMOA` is the only solver in the table below that actually uses the `-n 4` setting.
+
+Reproduction command:
 
 ```bash
-./main -m maps/NY-d.txt maps/NY-t.txt maps/NY-c.txt \
-       --alg SOPMOA \
-       --scenario scen/good.json \
-       --timelimit 3600 \
-       --threads 16 \
-       --outdir out/sopmoa \
-       --logcsv out/sopmoa/results.csv \
-       --logsols out/sopmoa/solutions
-```
+mkdir -p output/bench
 
-Compare against LTMOA* and EMOA*:
-
-```bash
-for ALG in LTMOA EMOA; do
-  ./main -m maps/NY-d.txt maps/NY-t.txt maps/NY-c.txt \
-         --alg "$ALG" \
-         --scenario scen/good.json \
-         --timelimit 3600 \
-         --threads 16 \
-         --outdir "out/$ALG" \
-         --logcsv "out/$ALG/results.csv" \
-         --logsols "out/$ALG/solutions"
+for ALG in SOPMOA LTMOA LazyLTMOA LTMOA_array LazyLTMOA_array EMOA NWMOA; do
+  ./Release/main \
+    -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
+    -s 88959 \
+    -t 96072 \
+    -o "output/bench/${ALG}.csv" \
+    -a "$ALG" \
+    --timelimit 2 \
+    -n 4
 done
 ```
 
+Measured results on this machine:
 
+| Algorithm | Threads used | Runtime (s) | Generated | Expanded | Solutions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `SOPMOA` | 4 | 2.00611 | 105,082 | 102,946 | 380 |
+| `LTMOA` | 1 | 3.46159 | 317,047 | 303,935 | 932 |
+| `LazyLTMOA` | 1 | 3.87518 | 455,678 | 304,071 | 932 |
+| `LTMOA_array` | 1 | 3.51381 | 1,074,754 | 982,023 | 1,936 |
+| `LazyLTMOA_array` | 1 | 4.14031 | 1,119,471 | 664,652 | 1,545 |
+| `EMOA` | 1 | 4.14829 | 445,188 | 421,791 | 1,142 |
+| `NWMOA` | 1 | 4.1424 | 454,791 | 357,704 | 1,029 |
 
-### Outputs
+Observed locally:
 
-* **CSV (`--logcsv`)**: one row per query/algorithm with at least:
+- `LTMOA_array` produced the largest number of solutions in this short run.
+- `SOPMOA` stayed closest to the requested wall-clock budget and expanded far fewer labels than the serial baselines in this specific setup.
+- `SOPMOA_bucket` was not included in the table because it aborted locally with exit code `134` and produced no CSV output on the same query.
 
-  * `alg, name, threads, timelimit, seed, generated, expanded, open_max, gcl_max, runtime_ms, solved`
-* **Solutions (`--logsols`)**: one file per query containing the Pareto front
+## Project Layout
 
-  * Typical columns: `f1,f2,f3[,f4]` and optional path/length stats
-* **Console logs**: progress, timing, and end-of-run summary
-
-> Column names can be adapted to your current logger; keep them consistent across solvers for easy plotting.
-
-
-
-### Reproducibility
-
-To match paper runs:
-
-* **Hardware**: record CPU model, sockets, cores, L3 cache, RAM
-* **Software**: OS, compiler version, Boost/OpenMP/TBB versions
-* **Threading**:
-
-  * `OMP_PROC_BIND=close` and `OMP_PLACES=cores` (OpenMP)
-  * `TBB_NUM_THREADS=<N>` (if using TBB thread control)
-* **Seeds**: fix `--seed`, and freeze scenario files
-* **Commands**: check in your exact command lines in `scripts/`
-
-Example (16 cores, pinned):
-
-```bash
-export OMP_PROC_BIND=close
-export OMP_PLACES=cores
-export TBB_NUM_THREADS=16
-./main ... --threads 16 ...
-```
-
-
-
-### Performance tips
-
-* Prefer **Release** builds (`-O3 -DNDEBUG`) for all runs.
-* Scale threads in {1, 2, 4, 8, 16, 20, 24, 32} and plot speedup curves.
-* Use **separate weight files** per objective to simplify I/O and caching.
-* For heavy batches, set `--outdir` to a local SSD path to avoid I/O stalls.
-* If you enable the *multi-queue* PQ (when available), expect reduced contention at ≥16 threads; otherwise, the shared PQ is simpler and strong up to mid-teens.
-
-
-
-### Project layout
-
-```
+```text
 .
-├── inc/algorithms/         # headers for SOPMOA*, LTMOA*, EMOA*, ...
-├── src/algorithms/         # implementations
-├── src/problem/            # graph, loaders, heuristics
-├── src/utils/              # logging, timing, argument parsing
-├── maps/                   # example weight files (see formats above)
-├── scen/                   # scenario JSONs (batch queries)
-├── scripts/                # helper scripts (plotting, benchmarks)
-├── query_generator.py      # (optional) scenario helpers
-├── query_random.py         # (optional) scenario helpers
 ├── CMakeLists.txt
-└── README.md
+├── README.md
+├── run_command.txt
+├── inc/
+│   ├── algorithms/
+│   ├── problem/
+│   └── utils/
+├── src/
+│   ├── algorithms/
+│   ├── problem/
+│   └── utils/
+├── maps/
+├── scen/
+├── query_generator.py
+├── query_random.py
+├── Poster.pdf
+└── Preprint.pdf
 ```
 
-
-
-### Cite
+## Cite
 
 If you use SOPMOA* or this codebase in academic work, please cite:
 
 ```bibtex
 @inproceedings{YourSOPMOA2025,
   title     = {SOPMOA*: Shared-OPEN Parallel A* for Multi-Objective Shortest Paths},
-  author    = {Truong, L.V., Dam, T.M., Nguyen, T.A., Nguyen, L.T.T., Dinh, D.T. },
-  booktitle = {Proceedings of Computational Science – ICCS 2025. ICCS 2025. Lecture Notes in Computer Science, vol 15906. Springer, Cham},
+  author    = {Truong, L.V., Dam, T.M., Nguyen, T.A., Nguyen, L.T.T., Dinh, D.T.},
+  booktitle = {Proceedings of Computational Science - ICCS 2025. ICCS 2025. Lecture Notes in Computer Science, vol 15906. Springer, Cham},
   year      = {2025},
   note      = {Code: https://github.com/damminhtien/SOPMOA}
 }
 ```
 
+## Acknowledgments
 
-### Acknowledgments
-
-We acknowledge foundational MOSP solvers in the literature (LTMOA*, EMOA*, NWMOA, BOA*, ABOA*) and the open-source ecosystem around **Boost**, **OpenMP**, and **oneTBB**.
-
-
-
-#### Changelog (optional)
-
-Maintain a `CHANGELOG.md` with semantic versioning once you publish your first release.
-
-
-
-#### Contributing (optional)
-
-* Use feature branches and conventional commit messages.
-* Run CI locally: `cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build build -j`
-* Open a PR with a clear problem statement, baseline command, and results snippet.
-
+This repository builds on prior exact MOSP solvers in the literature, especially LTMOA, EMOA, and NWMOA, and uses Boost, OpenMP, and oneTBB in the implementation.

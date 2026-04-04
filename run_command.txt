@@ -1,44 +1,65 @@
-mkdir Release
-cd Release
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make
+# Build a fresh Release directory on macOS with Homebrew dependencies.
+PREFIXES="$(brew --prefix boost);$(brew --prefix tbb);$(brew --prefix libomp)"
+cmake -S . -B Release \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH="$PREFIXES" \
+  -DOpenMP_ROOT="$(brew --prefix libomp)"
+cmake --build Release -j
 
-mkdir Debug
-cd Debug
-cmake .. -DCMAKE_BUILD_TYPE=Debug
-make
+# Show the current CLI.
+./Release/main --help
 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-l.txt --output "../output/run.csv" --logsols "../output/SOPMOA" -s 1000 -t 80000 --alg SOPMOA --timelimit 3600
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-l.txt --output "../output/run.csv" --logsols "../output/LTMOA" -s 1000 -t 10000 --alg LTMOA --timelimit 3600
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-l.txt --output "../output/run.csv" --logsols "../output/EMOA" -s 1000 -t 10000 --alg EMOA --timelimit 3600
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-l.txt --output "../output/run.csv" --logsols "../output/NWMOA" -s 1000 -t 10000 --alg NWMOA --timelimit 3600
+# Prepare local output directories.
+mkdir -p output
+mkdir -p output/bench
+mkdir -p output/SOPMOA
 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --scenario "../scen/query1.json" --output "../output/sopmoa_result.csv" --logsols "../output/SOPMOA" --alg SOPMOA --timelimit 3600 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt  ../maps/NY-r.txt --scenario "../scen/query1.json" --output "../output/ltmoa_result.csv" --logsols "../output/LTMOA" --alg LTMOA --timelimit 3600 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt  ../maps/NY-r.txt --scenario "../scen/query1.json" --output "../output/emoa_result.csv" --logsols "../output/EMOA" --alg EMOA --timelimit 3600 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt  ../maps/NY-r.txt --scenario "../scen/query1.json" --output "../output/nwmoa_result.csv" --logsols "../output/NWMOA" --alg NWMOA --timelimit 3600 
+# Single-query SOPMOA smoke test on the 3-objective NYC maps.
+./Release/main \
+  -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
+  -s 88959 \
+  -t 96072 \
+  -o output/sopmoa_smoke.csv \
+  -a SOPMOA \
+  --timelimit 2 \
+  -n 4
 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --scenario "../scen/query3.json" --output "../output/ltmoa_array_result.csv" --logsols "../output/LTMOA_array" --alg LTMOA_array --timelimit 3600 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt  ../maps/NY-r.txt --scenario "../scen/query1.json" --output "../output/lazy_ltmoa_array_result.csv" --logsols "../output/LazyLTMOA_array" --alg LazyLTMOA_array --timelimit 3600 
+# Scenario-based SOPMOA run for the first query in scen/query3.json.
+./Release/main \
+  -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
+  --scenario scen/query3.json \
+  --from 0 \
+  --to 1 \
+  -o output/sopmoa_query3.csv \
+  --logsols output/SOPMOA \
+  -a SOPMOA \
+  --timelimit 2 \
+  -n 4
 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --scenario "../scen/query5.json" --output "../output/sopmoa_result.csv" --logsols "../output/SOPMOA" --alg SOPMOA --timelimit 3600 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --scenario "../scen/query5.json" --output "../output/emoa_result.csv" --logsols "../output/EMOA" --alg EMOA --timelimit 3600 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --scenario "../scen/query5.json" --output "../output/nwmoa_result.csv" --logsols "../output/NWMOA" --alg NWMOA --timelimit 3600 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --scenario "../scen/query5.json" --output "../output/ltmoa_result.csv" --logsols "../output/LTMOA" --alg LTMOA --timelimit 3600 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --scenario "../scen/query5.json" --output "../output/lazy_ltmoa_result.csv" --logsols "../output/LazyLTMOA" --alg LazyLTMOA --timelimit 3600 
+# Local comparison benchmark used in README.md.
+for ALG in SOPMOA LTMOA LazyLTMOA LTMOA_array LazyLTMOA_array EMOA NWMOA; do
+  ./Release/main \
+    -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
+    -s 88959 \
+    -t 96072 \
+    -o "output/bench/${ALG}.csv" \
+    -a "$ALG" \
+    --timelimit 2 \
+    -n 4
+done
 
+# Optional: inspect the benchmark CSV files.
+for CSV in output/bench/*.csv; do
+  echo "== $CSV =="
+  cat "$CSV"
+done
 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --output "../output/nwmoa_result.csv" --logsols "../output/NWMOA" --alg NWMOA --timelimit 3600 --scenario "../scen/query5.json" 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --output "../output/sopmoa_bucket_result.csv" --logsols "../output/SOPMOA" --alg SOPMOA_bucket --timelimit 3600 --scenario "../scen/query5.json" 
-
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --output "../output/lazy_ltmoa_array_result.csv" --logsols "../output/LazyLTMOA_array" --alg LazyLTMOA_array --timelimit 3600 --scenario "../scen/query5.json" 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --output "../output/sopmoa_result.csv" --logsols "../output/SOPMOA" --alg SOPMOA --timelimit 3600 --scenario "../scen/good.json"
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt --output "../output/nwmoa_result.csv" --logsols "../output/NWMOA" --alg NWMOA --timelimit 3600 --scenario "../scen/good.json" 
-
-
-
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt ../maps/NY-r.txt --output "../output/sopmoa_result.csv" --logsols "../output/SOPMOA" --alg SOPMOA --timelimit 3600 --scenario "../scen/good.json" 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt ../maps/NY-r.txt --output "../output/nwmoa_result.csv" --logsols "../output/NWMOA" --alg NWMOA --timelimit 3600 --scenario "../scen/good.json" 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt ../maps/NY-r.txt --output "../output/ltmoa_result.csv" --logsols "../output/LTMOA" --alg LTMOA --timelimit 3600 --scenario "../scen/good.json" 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt ../maps/NY-r.txt --output "../output/lazy_ltmoa_result.csv" --logsols "../output/LazyLTMOA" --alg LazyLTMOA --timelimit 3600 --scenario "../scen/good.json" 
-./main -m ../maps/NY-d.txt ../maps/NY-t.txt  ../maps/NY-m.txt ../maps/NY-r.txt --output "../output/emoa_result.csv" --logsols "../output/EMOA" --alg EMOA --timelimit 3600 --scenario "../scen/good.json" 
+# SOPMOA_bucket currently aborts locally on the same benchmark query.
+./Release/main \
+  -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
+  -s 88959 \
+  -t 96072 \
+  -o output/bench/SOPMOA_bucket.csv \
+  -a SOPMOA_bucket \
+  --timelimit 2 \
+  -n 4
