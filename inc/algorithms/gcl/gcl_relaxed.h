@@ -5,41 +5,20 @@
 #include "../../utils/cost.h"
 
 #include <atomic>
-#include <memory>
 #include <mutex>
 
-template<int N, size_t HOT_CACHE_SIZE = 4, size_t INITIAL_CAPACITY = 8>
+template<int N, size_t HOT_CACHE_SIZE = 4, uint32_t BLOCK_SIZE = 32>
 class Gcl_relaxed {
 public:
-    struct FrontEntry {
-        CostVec<N> cost{};
-        std::atomic<uint8_t> alive{0};
-        double time_found = -1.0;
-
-        FrontEntry() = default;
-
-        FrontEntry(const CostVec<N>& cost, double time_found)
-        : cost(cost), time_found(time_found) {
-            alive.store(1, std::memory_order_relaxed);
-        }
-
-        FrontEntry(const FrontEntry& other)
-        : cost(other.cost), time_found(other.time_found) {
-            alive.store(other.alive.load(std::memory_order_relaxed), std::memory_order_relaxed);
-        }
-
-        FrontEntry& operator=(const FrontEntry& other) {
-            if (this == &other) { return *this; }
-            cost = other.cost;
-            time_found = other.time_found;
-            alive.store(other.alive.load(std::memory_order_relaxed), std::memory_order_relaxed);
-            return *this;
-        }
-    };
-
     struct SnapshotEntry {
         CostVec<N> cost{};
         double time_found = -1.0;
+    };
+
+    struct CheckStats {
+        size_t blocks_scanned = 0;
+        size_t live_entries_scanned = 0;
+        size_t dead_entries_encountered = 0;
     };
 
     using Snapshot = std::vector<SnapshotEntry>;
@@ -47,29 +26,74 @@ public:
     explicit Gcl_relaxed(size_t num_node)
     : frontiers(num_node + 1) {}
 
-    std::string get_name() const { return "optimistic_vector"; }
+    std::string get_name() const { return "blocked_skyline"; }
 
-    inline bool frontier_check(size_t node, const CostVec<N>& cost) const {
+    inline bool frontier_check(
+        size_t node,
+        const CostVec<N>& cost,
+        CheckStats* stats = nullptr,
+        SnapshotEntry* witness = nullptr
+    ) const {
         if (node >= frontiers.size()) { return false; }
 
-        const Storage* storage = frontiers[node].active.load(std::memory_order_acquire);
-        if (storage == nullptr) { return false; }
-
-        const size_t published_size = storage->published_size.load(std::memory_order_acquire);
-        const size_t hot_cache_size = storage->hot_cache_size.load(std::memory_order_acquire);
-        for (size_t i = 0; i < hot_cache_size; i++) {
-            const size_t idx = storage->hot_cache_idx[i].load(std::memory_order_relaxed);
-            if (idx >= published_size) { continue; }
-
-            const FrontEntry& entry = storage->entries[idx];
-            if (entry.alive.load(std::memory_order_acquire) == 0) { continue; }
-            if (weakly_dominate<N>(entry.cost, cost)) { return true; }
+        const NodeFrontier& frontier = frontiers[node];
+        for (int dim = 0; dim < N; dim++) {
+            if (frontier.frontier_min[dim].load(std::memory_order_acquire) > cost[dim]) {
+                return false;
+            }
         }
 
-        for (size_t idx = 0; idx < published_size; idx++) {
-            const FrontEntry& entry = storage->entries[idx];
-            if (entry.alive.load(std::memory_order_acquire) == 0) { continue; }
-            if (weakly_dominate<N>(entry.cost, cost)) { return true; }
+        const uint32_t hot_size = frontier.hot_size.load(std::memory_order_acquire);
+        for (uint32_t i = 0; i < hot_size; i++) {
+            CostVec<N> cached_cost;
+            for (int dim = 0; dim < N; dim++) {
+                cached_cost[dim] = frontier.hot_costs[i][dim].load(std::memory_order_relaxed);
+            }
+            if (!weakly_dominate<N>(cached_cost, cost)) { continue; }
+
+            if (witness != nullptr) {
+                witness->cost = cached_cost;
+                witness->time_found = frontier.hot_times[i].load(std::memory_order_relaxed);
+            }
+            return true;
+        }
+
+        Block* block = frontier.head.load(std::memory_order_acquire);
+        while (block != nullptr) {
+            if (stats != nullptr) {
+                stats->blocks_scanned++;
+            }
+
+            if (block_cannot_dominate(block, cost)) {
+                block = block->next.load(std::memory_order_acquire);
+                continue;
+            }
+
+            const uint32_t count = block->count.load(std::memory_order_acquire);
+            const uint32_t live_mask = block->live_mask.load(std::memory_order_acquire);
+
+            for (uint32_t idx = 0; idx < count; idx++) {
+                const uint32_t bit = (1u << idx);
+                if ((live_mask & bit) == 0) {
+                    if (stats != nullptr) {
+                        stats->dead_entries_encountered++;
+                    }
+                    continue;
+                }
+
+                if (stats != nullptr) {
+                    stats->live_entries_scanned++;
+                }
+                if (!weakly_dominate<N>(block->costs[idx], cost)) { continue; }
+
+                if (witness != nullptr) {
+                    witness->cost = block->costs[idx];
+                    witness->time_found = block->time_found[idx];
+                }
+                return true;
+            }
+
+            block = block->next.load(std::memory_order_acquire);
         }
 
         return false;
@@ -85,84 +109,76 @@ public:
         NodeFrontier& frontier = frontiers[node];
         std::lock_guard<std::mutex> guard(frontier.writer_lock);
 
-        Storage* storage = frontier.active.load(std::memory_order_acquire);
-        std::vector<size_t> dominated_indices;
-        dominated_indices.reserve(8);
+        struct DominatedBlockMask {
+            Block* block = nullptr;
+            uint32_t mask = 0;
+        };
+        std::vector<DominatedBlockMask> dominated;
+        dominated.reserve(4);
 
-        if (storage != nullptr) {
-            const size_t published_size = storage->published_size.load(std::memory_order_acquire);
-            for (size_t idx = 0; idx < published_size; idx++) {
-                const FrontEntry& entry = storage->entries[idx];
-                if (entry.alive.load(std::memory_order_acquire) == 0) { continue; }
+        Block* block = frontier.head.load(std::memory_order_relaxed);
+        while (block != nullptr) {
+            const uint32_t count = block->count.load(std::memory_order_relaxed);
+            const uint32_t live_mask = block->live_mask.load(std::memory_order_relaxed);
 
-                if (weakly_dominate<N>(entry.cost, cost)) {
+            DominatedBlockMask local;
+            local.block = block;
+
+            for (uint32_t idx = 0; idx < count; idx++) {
+                const uint32_t bit = (1u << idx);
+                if ((live_mask & bit) == 0) { continue; }
+
+                const CostVec<N>& existing = block->costs[idx];
+                if (weakly_dominate<N>(existing, cost)) {
                     return false;
                 }
-                if (weakly_dominate<N>(cost, entry.cost)) {
-                    dominated_indices.push_back(idx);
-                }
-            }
-        }
-
-        const size_t projected_live = frontier.live_count + 1 - dominated_indices.size();
-        const size_t projected_dead = frontier.dead_count + dominated_indices.size();
-        const bool need_compact = storage != nullptr
-            && storage->published_size.load(std::memory_order_relaxed) >= 32
-            && projected_dead >= projected_live;
-        const bool need_grow = storage == nullptr
-            || storage->published_size.load(std::memory_order_relaxed) == storage->capacity;
-
-        if (need_grow || need_compact) {
-            const size_t next_capacity = std::max(
-                INITIAL_CAPACITY,
-                std::max(projected_live, size_t(1)) * 2
-            );
-            auto next_storage = std::make_unique<Storage>(next_capacity);
-            size_t next_size = 0;
-
-            if (storage != nullptr) {
-                const size_t published_size = storage->published_size.load(std::memory_order_acquire);
-                for (size_t idx = 0; idx < published_size; idx++) {
-                    const FrontEntry& entry = storage->entries[idx];
-                    if (entry.alive.load(std::memory_order_acquire) == 0) { continue; }
-                    if (weakly_dominate<N>(cost, entry.cost)) { continue; }
-
-                    next_storage->entries[next_size] = entry;
-                    next_storage->entries[next_size].alive.store(1, std::memory_order_relaxed);
-                    next_size++;
+                if (weakly_dominate<N>(cost, existing)) {
+                    local.mask |= bit;
                 }
             }
 
-            next_storage->entries[next_size] = FrontEntry(cost, time_found);
-            next_size++;
-            next_storage->published_size.store(next_size, std::memory_order_release);
-
-            if (need_compact) {
-                num_compactions.fetch_add(1, std::memory_order_relaxed);
+            if (local.mask != 0) {
+                dominated.push_back(local);
             }
 
-            if (frontier.active_owner) {
-                frontier.retired.push_back(std::move(frontier.active_owner));
+            block = block->next.load(std::memory_order_relaxed);
+        }
+
+        for (const auto& entry : dominated) {
+            uint32_t live_mask = entry.block->live_mask.load(std::memory_order_relaxed);
+            live_mask &= ~entry.mask;
+            entry.block->live_mask.store(live_mask, std::memory_order_release);
+            frontier.live_count -= popcount32(entry.mask);
+            update_block_min_locked(entry.block);
+        }
+
+        Block* tail = frontier.tail;
+        if (tail == nullptr || tail->count.load(std::memory_order_relaxed) == BLOCK_SIZE) {
+            frontier.blocks.push_back(std::make_unique<Block>());
+            Block* new_block = frontier.blocks.back().get();
+            if (tail == nullptr) {
+                frontier.head.store(new_block, std::memory_order_release);
+            } else {
+                tail->next.store(new_block, std::memory_order_release);
             }
-            frontier.active_owner = std::move(next_storage);
-            frontier.active.store(frontier.active_owner.get(), std::memory_order_release);
-            frontier.live_count = next_size;
-            frontier.dead_count = 0;
-            refresh_hot_cache_locked(frontier, next_size - 1);
-            return true;
+            frontier.tail = new_block;
+            frontier.block_count++;
+            tail = new_block;
         }
 
-        for (size_t idx : dominated_indices) {
-            storage->entries[idx].alive.store(0, std::memory_order_release);
-        }
-        frontier.dead_count += dominated_indices.size();
-        frontier.live_count -= dominated_indices.size();
+        const uint32_t idx = tail->count.load(std::memory_order_relaxed);
+        tail->costs[idx] = cost;
+        tail->time_found[idx] = time_found;
+        update_block_min_with_candidate_locked(tail, cost);
 
-        const size_t next_idx = storage->published_size.load(std::memory_order_relaxed);
-        storage->entries[next_idx] = FrontEntry(cost, time_found);
-        storage->published_size.store(next_idx + 1, std::memory_order_release);
+        uint32_t live_mask = tail->live_mask.load(std::memory_order_relaxed);
+        live_mask |= (1u << idx);
+        tail->live_mask.store(live_mask, std::memory_order_release);
+        tail->count.store(idx + 1, std::memory_order_release);
+
         frontier.live_count++;
-        refresh_hot_cache_locked(frontier, next_idx);
+        refresh_frontier_min_locked(frontier);
+        refresh_hot_cache_locked(frontier);
         return true;
     }
 
@@ -172,96 +188,177 @@ public:
             return result;
         }
 
-        const Storage* storage = frontiers[node].active.load(std::memory_order_acquire);
-        if (storage == nullptr) {
-            return result;
+        const NodeFrontier& frontier = frontiers[node];
+        result->reserve(frontier.live_count);
+
+        Block* block = frontier.head.load(std::memory_order_acquire);
+        while (block != nullptr) {
+            const uint32_t count = block->count.load(std::memory_order_acquire);
+            const uint32_t live_mask = block->live_mask.load(std::memory_order_acquire);
+            for (uint32_t idx = 0; idx < count; idx++) {
+                const uint32_t bit = (1u << idx);
+                if ((live_mask & bit) == 0) { continue; }
+                result->push_back({block->costs[idx], block->time_found[idx]});
+            }
+            block = block->next.load(std::memory_order_acquire);
         }
 
-        const size_t published_size = storage->published_size.load(std::memory_order_acquire);
-        result->reserve(frontiers[node].live_count);
-        for (size_t idx = 0; idx < published_size; idx++) {
-            const FrontEntry& entry = storage->entries[idx];
-            if (entry.alive.load(std::memory_order_acquire) == 0) { continue; }
-
-            result->push_back({entry.cost, entry.time_found});
-        }
         return result;
     }
 
-    inline size_t get_compaction_count() const {
-        return num_compactions.load(std::memory_order_relaxed);
-    }
-
-    inline std::vector<size_t> live_frontier_sizes() const {
-        std::vector<size_t> sizes;
-        sizes.reserve(frontiers.size());
+    inline double average_blocks_per_visited_node() const {
+        size_t total_blocks = 0;
+        size_t visited_nodes = 0;
         for (const auto& frontier : frontiers) {
-            if (frontier.live_count > 0) {
-                sizes.push_back(frontier.live_count);
-            }
+            if (frontier.live_count == 0) { continue; }
+            visited_nodes++;
+            total_blocks += frontier.block_count;
         }
-        return sizes;
+
+        if (visited_nodes == 0) { return 0.0; }
+        return static_cast<double>(total_blocks) / static_cast<double>(visited_nodes);
     }
 
 private:
-    struct Storage {
-        explicit Storage(size_t capacity)
-        : entries(new FrontEntry[capacity]), capacity(capacity) {
-            for (auto& idx : hot_cache_idx) {
-                idx.store(std::numeric_limits<size_t>::max(), std::memory_order_relaxed);
+    struct Block {
+        std::array<CostVec<N>, BLOCK_SIZE> costs{};
+        std::array<double, BLOCK_SIZE> time_found{};
+        std::atomic<uint32_t> count{0};
+        std::atomic<uint32_t> live_mask{0};
+        std::array<std::atomic<cost_t>, N> block_min{};
+        std::atomic<Block*> next{nullptr};
+
+        Block() {
+            for (int dim = 0; dim < N; dim++) {
+                block_min[dim].store(MAX_COST, std::memory_order_relaxed);
             }
         }
-
-        std::unique_ptr<FrontEntry[]> entries;
-        size_t capacity;
-        std::atomic<size_t> published_size{0};
-        std::array<std::atomic<size_t>, HOT_CACHE_SIZE> hot_cache_idx{};
-        std::atomic<size_t> hot_cache_size{0};
     };
 
     struct NodeFrontier {
-        std::atomic<Storage*> active{nullptr};
-        std::unique_ptr<Storage> active_owner;
-        std::vector<std::unique_ptr<Storage>> retired;
+        std::vector<std::unique_ptr<Block>> blocks;
+        std::atomic<Block*> head{nullptr};
+        Block* tail = nullptr;
         size_t live_count = 0;
-        size_t dead_count = 0;
+        size_t block_count = 0;
         mutable std::mutex writer_lock;
+        std::array<std::array<std::atomic<cost_t>, N>, HOT_CACHE_SIZE> hot_costs{};
+        std::array<std::atomic<double>, HOT_CACHE_SIZE> hot_times{};
+        std::atomic<uint32_t> hot_size{0};
+        std::array<std::atomic<cost_t>, N> frontier_min{};
+
+        NodeFrontier() {
+            for (size_t slot = 0; slot < HOT_CACHE_SIZE; slot++) {
+                hot_times[slot].store(-1.0, std::memory_order_relaxed);
+                for (int dim = 0; dim < N; dim++) {
+                    hot_costs[slot][dim].store(MAX_COST, std::memory_order_relaxed);
+                }
+            }
+            for (int dim = 0; dim < N; dim++) {
+                frontier_min[dim].store(MAX_COST, std::memory_order_relaxed);
+            }
+        }
     };
 
-    inline void refresh_hot_cache_locked(NodeFrontier& frontier, size_t preferred_idx) {
-        Storage* storage = frontier.active.load(std::memory_order_relaxed);
-        if (storage == nullptr) { return; }
+    static inline uint32_t popcount32(uint32_t value) {
+        return static_cast<uint32_t>(__builtin_popcount(value));
+    }
 
-        const size_t published_size = storage->published_size.load(std::memory_order_relaxed);
-        std::array<size_t, HOT_CACHE_SIZE> picks{};
-        size_t picked = 0;
-
-        auto remember = [&](size_t idx) {
-            if (idx >= published_size) { return; }
-            if (storage->entries[idx].alive.load(std::memory_order_relaxed) == 0) { return; }
-
-            for (size_t i = 0; i < picked; i++) {
-                if (picks[i] == idx) { return; }
+    static inline bool block_cannot_dominate(const Block* block, const CostVec<N>& cost) {
+        for (int dim = 0; dim < N; dim++) {
+            if (block->block_min[dim].load(std::memory_order_acquire) > cost[dim]) {
+                return true;
             }
-            picks[picked++] = idx;
-        };
+        }
+        return false;
+    }
 
-        remember(preferred_idx);
-        for (size_t idx = published_size; idx > 0 && picked < HOT_CACHE_SIZE; idx--) {
-            remember(idx - 1);
+    static inline void update_block_min_locked(Block* block) {
+        CostVec<N> min_cost;
+        min_cost.fill(MAX_COST);
+
+        const uint32_t count = block->count.load(std::memory_order_relaxed);
+        const uint32_t live_mask = block->live_mask.load(std::memory_order_relaxed);
+        for (uint32_t idx = 0; idx < count; idx++) {
+            const uint32_t bit = (1u << idx);
+            if ((live_mask & bit) == 0) { continue; }
+
+            for (int dim = 0; dim < N; dim++) {
+                min_cost[dim] = std::min(min_cost[dim], block->costs[idx][dim]);
+            }
         }
 
-        for (size_t i = 0; i < picked; i++) {
-            storage->hot_cache_idx[i].store(picks[i], std::memory_order_relaxed);
+        for (int dim = 0; dim < N; dim++) {
+            block->block_min[dim].store(min_cost[dim], std::memory_order_release);
         }
-        for (size_t i = picked; i < HOT_CACHE_SIZE; i++) {
-            storage->hot_cache_idx[i].store(std::numeric_limits<size_t>::max(), std::memory_order_relaxed);
+    }
+
+    static inline void update_block_min_with_candidate_locked(Block* block, const CostVec<N>& cost) {
+        for (int dim = 0; dim < N; dim++) {
+            cost_t current = block->block_min[dim].load(std::memory_order_relaxed);
+            if (cost[dim] < current) {
+                block->block_min[dim].store(cost[dim], std::memory_order_release);
+            }
         }
-        storage->hot_cache_size.store(picked, std::memory_order_release);
+    }
+
+    inline void refresh_hot_cache_locked(NodeFrontier& frontier) {
+        std::array<SnapshotEntry, HOT_CACHE_SIZE> latest{};
+        size_t total = 0;
+
+        Block* block = frontier.head.load(std::memory_order_relaxed);
+        while (block != nullptr) {
+            const uint32_t count = block->count.load(std::memory_order_relaxed);
+            const uint32_t live_mask = block->live_mask.load(std::memory_order_relaxed);
+            for (uint32_t idx = 0; idx < count; idx++) {
+                const uint32_t bit = (1u << idx);
+                if ((live_mask & bit) == 0) { continue; }
+
+                SnapshotEntry entry{block->costs[idx], block->time_found[idx]};
+                if (total < HOT_CACHE_SIZE) {
+                    latest[total] = entry;
+                } else {
+                    latest[total % HOT_CACHE_SIZE] = entry;
+                }
+                total++;
+            }
+            block = block->next.load(std::memory_order_relaxed);
+        }
+
+        const size_t hot_entries = std::min<size_t>(HOT_CACHE_SIZE, total);
+        const size_t start = total > HOT_CACHE_SIZE ? (total % HOT_CACHE_SIZE) : 0;
+
+        for (size_t slot = 0; slot < hot_entries; slot++) {
+            const SnapshotEntry& entry = latest[(start + slot) % HOT_CACHE_SIZE];
+            for (int dim = 0; dim < N; dim++) {
+                frontier.hot_costs[slot][dim].store(entry.cost[dim], std::memory_order_relaxed);
+            }
+            frontier.hot_times[slot].store(entry.time_found, std::memory_order_relaxed);
+        }
+        frontier.hot_size.store(static_cast<uint32_t>(hot_entries), std::memory_order_release);
+    }
+
+    inline void refresh_frontier_min_locked(NodeFrontier& frontier) {
+        CostVec<N> min_cost;
+        min_cost.fill(MAX_COST);
+
+        Block* block = frontier.head.load(std::memory_order_relaxed);
+        while (block != nullptr) {
+            for (int dim = 0; dim < N; dim++) {
+                min_cost[dim] = std::min(
+                    min_cost[dim],
+                    block->block_min[dim].load(std::memory_order_relaxed)
+                );
+            }
+            block = block->next.load(std::memory_order_relaxed);
+        }
+
+        for (int dim = 0; dim < N; dim++) {
+            frontier.frontier_min[dim].store(min_cost[dim], std::memory_order_release);
+        }
     }
 
     std::vector<NodeFrontier> frontiers;
-    std::atomic<size_t> num_compactions{0};
 };
 
 template class Gcl_relaxed<2>;

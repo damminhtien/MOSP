@@ -2,8 +2,6 @@
 #define ALGORITHM_SOPMOA_RELAXED
 
 #include <atomic>
-#include <mutex>
-#include <random>
 #include <thread>
 
 #include <tbb/concurrent_queue.h>
@@ -12,9 +10,9 @@
 #include "../problem/graph.h"
 #include "../problem/heuristic.h"
 #include "../utils/cost.h"
-#include "../utils/label.h"
 #include "abstract_solver.h"
 #include "gcl/gcl_relaxed.h"
+#include "gcl/gcl_relaxed_serial.h"
 
 template <int N>
 class SOPMOA_relaxed: public AbstractSolver {
@@ -25,100 +23,137 @@ public:
     ~SOPMOA_relaxed() override = default;
 
     std::string get_name() override {
-        return "SOPMOA_relaxed(" + std::to_string(N) + "obj|" + std::to_string(num_threads) + "threads)-" + gcl_ptr->get_name();
+        const std::string frontier_name = gcl_serial_ptr ? gcl_serial_ptr->get_name() : gcl_ptr->get_name();
+        return "SOPMOA_relaxed(" + std::to_string(N) + "obj|" + std::to_string(num_threads) + "threads)-" + frontier_name;
     }
 
     void solve(unsigned int time_limit = UINT_MAX) override;
 
 private:
-    static constexpr size_t BATCH_SIZE = 8;
-    static constexpr size_t STEAL_K = 2;
-    static constexpr size_t REMOTE_BATCH_SIZE = 16;
-    static constexpr size_t INBOX_DRAIN_LIMIT = 128;
+    static constexpr size_t POP_BATCH = 32;
+    static constexpr size_t LOCAL_KEEP = 8;
+    static constexpr size_t DONATE_CHUNK = 32;
+    static constexpr size_t SPILL_DONATE_THRESHOLD = 8;
+    static constexpr size_t SPILL_REFILL_CHUNK = 32;
     static constexpr size_t LABEL_BLOCK_SIZE = 4096;
+    static constexpr size_t TARGET_CACHE_SIZE = 8;
+    static constexpr size_t FRONTIER_HOT_CACHE_SIZE = 8;
 
-    template<size_t BLOCK_SIZE>
-    class LabelArena {
+    struct RelaxedLabel {
+        uint32_t node = 0;
+        CostVec<N> f{};
+        uint8_t should_check_sol = 0;
+    };
+
+    template<typename T, size_t BLOCK_SIZE>
+    class Arena {
     public:
-        Label<N>* create(size_t node, const CostVec<N>& f) {
-            Label<N>* slot = next_slot();
-            *slot = Label<N>(node, f);
-            slot->parent = nullptr;
-            slot->should_check_sol = false;
-            slot->set_next(nullptr);
-            return slot;
-        }
-
-        Label<N>* create(size_t node, CostVec<N> g, CostVec<N>& h) {
-            Label<N>* slot = next_slot();
-            *slot = Label<N>(node, g, h);
-            slot->parent = nullptr;
-            slot->should_check_sol = false;
-            slot->set_next(nullptr);
+        template<typename... Args>
+        T* create(Args&&... args) {
+            T* slot = next_slot();
+            *slot = T{std::forward<Args>(args)...};
             return slot;
         }
 
     private:
-        Label<N>* next_slot() {
+        T* next_slot() {
             if (blocks.empty() || next_index == BLOCK_SIZE) {
-                blocks.push_back(std::unique_ptr<Label<N>[]>(new Label<N>[BLOCK_SIZE]));
+                blocks.push_back(std::unique_ptr<T[]>(new T[BLOCK_SIZE]));
                 next_index = 0;
             }
-
             return &blocks.back()[next_index++];
         }
 
-        std::vector<std::unique_ptr<Label<N>[]>> blocks;
+        std::vector<std::unique_ptr<T[]>> blocks;
         size_t next_index = BLOCK_SIZE;
     };
 
-    struct InboxBatch {
-        std::array<Label<N>*, REMOTE_BATCH_SIZE> labels{};
+    struct WorkChunk {
+        std::array<RelaxedLabel*, DONATE_CHUNK> labels{};
         size_t size = 0;
     };
 
+    struct TargetWitnessCache {
+        size_t epoch = 0;
+        size_t size = 0;
+        std::array<CostVec<N>, TARGET_CACHE_SIZE> costs{};
+    };
+
     struct WorkerState {
-        std::vector<Label<N>*> heap;
-        tbb::concurrent_queue<InboxBatch> inbox;
-        std::vector<InboxBatch> pending_outboxes;
-        std::mutex heap_lock;
-        LabelArena<LABEL_BLOCK_SIZE> arena;
+        std::vector<RelaxedLabel*> hot_heap;
+        std::vector<RelaxedLabel*> spill_buffer;
+        std::vector<RelaxedLabel*> generated_batch;
+        std::vector<RelaxedLabel*> pop_batch;
+        Arena<RelaxedLabel, LABEL_BLOCK_SIZE> arena;
+        TargetWitnessCache target_cache;
         size_t local_generated = 0;
         size_t local_expanded = 0;
-        size_t local_steals = 0;
-        size_t local_inbox_batch_flushes = 0;
-        size_t local_inbox_labels_flushed = 0;
+        size_t local_donation_chunks_pushed = 0;
+        size_t local_donation_chunks_consumed = 0;
+        size_t local_spill_refills = 0;
+        size_t local_target_cache_hits = 0;
+        size_t local_target_cache_misses = 0;
         size_t local_target_checks = 0;
         size_t local_node_checks = 0;
+        size_t local_frontier_blocks_scanned = 0;
+        size_t local_frontier_live_entries_scanned = 0;
+        size_t local_frontier_dead_entries_encountered = 0;
         long long frontier_check_ns = 0;
     };
 
+    struct PackedGraph {
+        std::vector<size_t> offsets;
+        std::vector<uint32_t> tails;
+        std::array<std::vector<cost_t>, N> costs;
+    };
+
+    struct LabelLexLarger {
+        bool operator()(const RelaxedLabel* a, const RelaxedLabel* b) const {
+            for (int i = 0; i < N; i++) {
+                if (a->f[i] != b->f[i]) { return a->f[i] > b->f[i]; }
+            }
+            return false;
+        }
+    };
+
+    static inline bool label_lex_smaller(const RelaxedLabel* a, const RelaxedLabel* b) {
+        return lex_smaller<N>(a->f, b->f);
+    }
+
     int num_threads;
-    std::unique_ptr<Gcl_relaxed<N>> gcl_ptr;
+    std::unique_ptr<Gcl_relaxed<N, FRONTIER_HOT_CACHE_SIZE>> gcl_ptr;
+    std::unique_ptr<Gcl_relaxed_serial<N, FRONTIER_HOT_CACHE_SIZE>> gcl_serial_ptr;
+    PackedGraph packed_graph;
+    const CostVec<N>* heuristic_data = nullptr;
     std::vector<std::unique_ptr<WorkerState>> workers;
+    tbb::concurrent_queue<WorkChunk> donation_queue;
     std::atomic<size_t> inflight_labels{0};
     std::atomic<bool> stop_requested{false};
-    size_t total_steals = 0;
-    size_t total_inbox_batch_flushes = 0;
-    size_t total_inbox_labels_flushed = 0;
+    std::atomic<size_t> target_epoch{0};
+    size_t total_donation_chunks_pushed = 0;
+    size_t total_donation_chunks_consumed = 0;
+    size_t total_spill_refills = 0;
+    size_t total_target_cache_hits = 0;
+    size_t total_target_cache_misses = 0;
     size_t total_target_checks = 0;
     size_t total_node_checks = 0;
+    size_t total_frontier_blocks_scanned = 0;
+    size_t total_frontier_live_entries_scanned = 0;
+    size_t total_frontier_dead_entries_encountered = 0;
     long long total_frontier_check_ns = 0;
     std::chrono::steady_clock::time_point search_start;
 
-    inline size_t owner_of(size_t node) const { return node % num_threads; }
-
+    void build_packed_graph();
     void initialize_workers();
     void worker_loop(size_t worker_id, unsigned int time_limit);
-    void process_label(size_t worker_id, Label<N>* curr, unsigned int time_limit);
-    void enqueue_label(size_t worker_id, size_t owner_id, Label<N>* label);
-    void flush_outbox(size_t worker_id, size_t owner_id);
-    void flush_all_outboxes(size_t worker_id);
-    void drain_inbox(size_t worker_id, size_t limit = INBOX_DRAIN_LIMIT);
-    bool steal_label(size_t worker_id, std::minstd_rand& rng, Label<N>* &label);
+    bool refill_hot_heap_from_spill(size_t worker_id);
+    bool refill_hot_heap_from_donation(size_t worker_id);
+    void maybe_donate_work(size_t worker_id);
+    void push_hot_label(size_t worker_id, RelaxedLabel* label);
+    void process_label(size_t worker_id, RelaxedLabel* curr);
     bool target_dominated(size_t worker_id, const CostVec<N>& cost);
-    bool node_dominated(size_t worker_id, size_t node, const CostVec<N>& cost);
-    bool frontier_update(size_t node, const CostVec<N>& cost, double time_found = -1.0);
+    bool node_dominated(size_t worker_id, uint32_t node, const CostVec<N>& cost);
+    bool frontier_update(uint32_t node, const CostVec<N>& cost, double time_found = -1.0);
     void collect_final_solutions();
 };
 
