@@ -24,16 +24,14 @@ public:
     : AbstractSolver(adj_matrix, start_node, target_node),
     gcl_ptr(std::make_unique<Gcl_SOPMOA<N>>(adj_matrix.get_num_node())),
     heuristic(Heuristic<N>(target_node, inv_graph)), 
-    num_threads(num_threads) {
-        num_threads = NUM_THREADS;
-    }
+    num_threads(num_threads > 0 ? std::min(num_threads, NUM_THREADS) : NUM_THREADS) {}
 
     ~SOPMOA() {
         for (auto ptr : all_labels){ delete ptr; }
         gcl_ptr.reset();
     }
 
-    virtual std::string get_name() override {return "SOPMOA(" + std::to_string(N)+"obj|"+ std::to_string(NUM_THREADS)+"threads)-" + gcl_ptr->get_name(); }
+    virtual std::string get_name() override {return "SOPMOA(" + std::to_string(N)+"obj|"+ std::to_string(num_threads)+"threads)-" + gcl_ptr->get_name(); }
     void solve(unsigned int time_limit=UINT_MAX) override;
 
 private:

@@ -2,9 +2,10 @@
 
 template<int N>
 void SOPMOA_bucket<N>::solve(unsigned int time_limit) {
-    std::cout << "start SOPMOA_bucket " + std::to_string(NUM_THREADS_) + " threads\n";
+    std::cout << "start SOPMOA_bucket " + std::to_string(num_threads) + " threads\n";
 
-    is_thread_activating.fill(true);
+    is_thread_activating.fill(false);
+    std::fill_n(is_thread_activating.begin(), num_threads, true);
     open = pq_bucket<N>(1, 0, 1000);
 
     CostVec<N> start_g;
@@ -14,8 +15,8 @@ void SOPMOA_bucket<N>::solve(unsigned int time_limit) {
     all_labels.push_back(start_label);
     open.push(start_label);
 
-    #pragma omp parallel for num_threads(NUM_THREADS_)
-    for (int i = 0; i < NUM_THREADS_; i++) {
+    #pragma omp parallel for num_threads(num_threads)
+    for (int i = 0; i < num_threads; i++) {
         thread_solve(i, time_limit);
     }
 }

@@ -107,11 +107,11 @@ int main(int argc, char* argv[]) {
         ("from", po::value<int>()->default_value(0), "start from the i-th line of the scenario file")
         ("to", po::value<int>()->default_value(INT_MAX), "up to the i-th line of the scenario file")
         ("map,m",po::value< std::vector<string> >(&cost_files)->multitoken(), "files for edge weight")
-        ("algorithm,a", po::value<std::string>()->default_value("SOPMOA"), "solvers [SOPMOA, LTMOA, EMOA, NWMOA]")
+        ("algorithm,a", po::value<std::string>()->default_value("SOPMOA"), "solvers [SOPMOA, SOPMOA_bucket, LTMOA, LazyLTMOA, LTMOA_array, LazyLTMOA_array, EMOA, NWMOA]")
         ("timelimit", po::value<int>()->default_value(300), "cutoff time (seconds)")
         ("logsols", po::value<std::string>()->default_value(""), "if non-empty, dump solution cost to the directory")
         ("output,o", po::value<std::string>()->required(), "Name of the output file")
-        ("numthreads,n", po::value<int>()->default_value(-1), "number of threads");
+        ("numthreads,n", po::value<int>()->default_value(-1), "number of threads for SOPMOA and SOPMOA_bucket");
     
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
