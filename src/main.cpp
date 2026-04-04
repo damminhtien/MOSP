@@ -2,6 +2,7 @@
 
 #include"algorithms/abstract_solver.h"
 #include"algorithms/sopmoa.h"
+#include"algorithms/sopmoa_relaxed.h"
 #include"algorithms/sopmoa_bucket.h"
 #include"algorithms/ltmoa.h"
 #include"algorithms/lazy_ltmoa.h"
@@ -27,6 +28,9 @@ void single_run(AdjacencyMatrix& graph, AdjacencyMatrix&inv_graph, size_t start_
     if (algorithm == "SOPMOA") {
         int num_threads = vm["numthreads"].as<int>();
         solver = get_SOPMOA_solver(graph, inv_graph, start_node, target_node, num_threads);
+    } else if (algorithm == "SOPMOA_relaxed") {
+        int num_threads = vm["numthreads"].as<int>();
+        solver = get_SOPMOA_relaxed_solver(graph, inv_graph, start_node, target_node, num_threads);
     } else if (algorithm == "SOPMOA_bucket") {
         int num_threads = vm["numthreads"].as<int>();
         solver = get_SOPMOA_bucket_solver(graph, inv_graph, start_node, target_node, num_threads);
@@ -107,11 +111,11 @@ int main(int argc, char* argv[]) {
         ("from", po::value<int>()->default_value(0), "start from the i-th line of the scenario file")
         ("to", po::value<int>()->default_value(INT_MAX), "up to the i-th line of the scenario file")
         ("map,m",po::value< std::vector<string> >(&cost_files)->multitoken(), "files for edge weight")
-        ("algorithm,a", po::value<std::string>()->default_value("SOPMOA"), "solvers [SOPMOA, SOPMOA_bucket, LTMOA, LazyLTMOA, LTMOA_array, LazyLTMOA_array, EMOA, NWMOA]")
+        ("algorithm,a", po::value<std::string>()->default_value("SOPMOA"), "solvers [SOPMOA, SOPMOA_relaxed, SOPMOA_bucket, LTMOA, LazyLTMOA, LTMOA_array, LazyLTMOA_array, EMOA, NWMOA]")
         ("timelimit", po::value<int>()->default_value(300), "cutoff time (seconds)")
         ("logsols", po::value<std::string>()->default_value(""), "if non-empty, dump solution cost to the directory")
         ("output,o", po::value<std::string>()->required(), "Name of the output file")
-        ("numthreads,n", po::value<int>()->default_value(-1), "number of threads for SOPMOA and SOPMOA_bucket");
+        ("numthreads,n", po::value<int>()->default_value(-1), "number of threads for SOPMOA, SOPMOA_relaxed and SOPMOA_bucket");
     
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
