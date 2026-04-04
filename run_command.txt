@@ -12,6 +12,8 @@ cmake --build Release -j
 # Prepare local output directories.
 mkdir -p output
 mkdir -p output/bench
+mkdir -p output/bench-wallclock
+mkdir -p output/bench-suite
 mkdir -p output/SOPMOA
 
 # Single-query SOPMOA smoke test on the 3-objective NYC maps.
@@ -46,34 +48,56 @@ mkdir -p output/SOPMOA
   --timelimit 2 \
   -n 4
 
-# Local comparison benchmark used in README.md.
+# Canonical fair benchmark protocol used in README.md.
+# This runs every solver with the same wall-clock cutoff, prints a 1-thread
+# comparison table, then prints a separate 1-vs-4 scalability table for the
+# parallel solvers.
+python3 scripts/benchmark_wall_clock.py --runs 5 | tee output/bench-wallclock/benchmark.txt
+
+# Longer and more diverse suite benchmark.
+# This samples multiple scenario files and is better for cross-query comparisons.
+python3 scripts/benchmark_suite.py \
+  --scenario-files scen/query2.json scen/query3.json scen/query4.json scen/query5.json scen/query6.json \
+  --queries-per-scenario 1 \
+  --time-limit 5 \
+  --runs 1 | tee output/bench-suite/full-suite.txt
+
+# Focused head-to-head: SOPMOA_relaxed vs LTMOA_array on the same diverse suite.
+python3 scripts/benchmark_suite.py \
+  --algorithms SOPMOA_relaxed LTMOA_array \
+  --scenario-files scen/query2.json scen/query3.json scen/query4.json scen/query5.json scen/query6.json \
+  --queries-per-scenario 2 \
+  --time-limit 5 \
+  --runs 1 | tee output/bench-suite/relaxed-vs-ltmoa-array.txt
+
+# Optional: one-thread-only throughput pass without the summary script.
 for ALG in SOPMOA SOPMOA_relaxed LTMOA LazyLTMOA LTMOA_array LazyLTMOA_array EMOA NWMOA; do
   ./Release/main \
     -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
     -s 88959 \
     -t 96072 \
-    -o "output/bench/${ALG}.csv" \
+    -o "output/bench-wallclock/${ALG}-t1.csv" \
     -a "$ALG" \
     --timelimit 2 \
-    -n 4
+    -n 1
 done
 
-# 5-run comparison used to validate SOPMOA_relaxed.
-for ALG in SOPMOA LTMOA SOPMOA_relaxed; do
-  for RUN in 1 2 3 4 5; do
+# Optional: separate scalability pass for the parallel solvers.
+for ALG in SOPMOA SOPMOA_relaxed; do
+  for THREADS in 1 4; do
     ./Release/main \
       -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
       -s 88959 \
       -t 96072 \
-      -o "output/bench/${ALG}-${RUN}.csv" \
+      -o "output/bench-wallclock/${ALG}-t${THREADS}.csv" \
       -a "$ALG" \
       --timelimit 2 \
-      -n 4
+      -n "$THREADS"
   done
 done
 
 # Optional: inspect the benchmark CSV files.
-for CSV in output/bench/*.csv; do
+for CSV in output/bench-wallclock/*.csv; do
   echo "== $CSV =="
   cat "$CSV"
 done

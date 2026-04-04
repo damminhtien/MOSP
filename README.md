@@ -184,6 +184,8 @@ Example:
 SOPMOA(3obj|4threads)-custom_list,88959,96072,105082,102946,380,2.00611
 ```
 
+Each run also prints `Expansions/sec` to stdout so throughput can be compared under the same time budget without post-processing the CSV.
+
 If `--logsols` is enabled, each solution file contains one Pareto vector per line:
 
 ```text
@@ -191,9 +193,9 @@ If `--logsols` is enabled, each solution file contains one Pareto vector per lin
 [13,43,81]
 ```
 
-## Local Benchmark On April 4, 2026
+## Common Wall-Clock Benchmark Protocol On April 4, 2026
 
-The commands used below are also mirrored in `run_command.txt`.
+The commands used below are mirrored in `run_command.txt` and automated by `scripts/benchmark_wall_clock.py`.
 
 Benchmark setup:
 
@@ -201,80 +203,113 @@ Benchmark setup:
 - maps: `maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt`
 - query: `start=88959`, `target=96072`
 - requested budget: `--timelimit 2`
-- thread flag: `-n 4`
+- statistic: median over `5` runs
+- cutoff semantics: every solver now checks the same `steady_clock` wall-clock budget internally
 
 Important caveats:
 
-- This is a local smoke benchmark, not a publication-grade evaluation.
-- Several baseline solvers exceeded the requested 2-second budget before their next termination check, so their recorded wall times are closer to `3.4-4.3s`.
-- `SOPMOA` and `SOPMOA_relaxed` are the only solvers in the tables below that actually use the `-n 4` setting.
+- This is still a local machine benchmark, not a publication-grade evaluation.
+- Small runtime overshoot can remain because each solver checks the cutoff once per main loop iteration; on this machine `NWMOA` landed at about `2.02s`.
+- `SOPMOA_bucket` is excluded because it still aborts locally on the benchmark query.
 
-Reproduction command:
-
-```bash
-mkdir -p output/bench
-
-for ALG in SOPMOA LTMOA LazyLTMOA LTMOA_array LazyLTMOA_array EMOA NWMOA; do
-  ./Release/main \
-    -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
-    -s 88959 \
-    -t 96072 \
-    -o "output/bench/${ALG}.csv" \
-    -a "$ALG" \
-    --timelimit 2 \
-    -n 4
-done
-```
-
-`SOPMOA_relaxed` 5-run comparison used for the new solver validation:
+Canonical reproduction command:
 
 ```bash
-for ALG in SOPMOA LTMOA SOPMOA_relaxed; do
-  for RUN in 1 2 3 4 5; do
-    ./Release/main \
-      -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
-      -s 88959 \
-      -t 96072 \
-      -o "output/bench/${ALG}-${RUN}.csv" \
-      -a "$ALG" \
-      --timelimit 2 \
-      -n 4
-  done
-done
+mkdir -p output/bench-wallclock
+python3 scripts/benchmark_wall_clock.py --runs 5 | tee output/bench-wallclock/benchmark.txt
 ```
 
-Median over 5 runs on this machine:
+### 1-Thread Comparison
 
-| Algorithm | Threads used | Median runtime (s) | Avg runtime (s) | Representative solutions |
-| --- | ---: | ---: | ---: | ---: |
-| `SOPMOA_relaxed` | 4 | 2.00048 | 2.00055 | 1,429 |
-| `SOPMOA` | 4 | 2.00418 | 2.00490 | 400 |
-| `LTMOA` | 1 | 3.47814 | 3.76170 | 876 |
+All solvers were run under the same 2-second wall-clock cutoff. For the parallel solvers, this table uses `-n 1`.
 
-Observed locally for the new solver:
+| Algorithm | Threads | Median runtime (s) | Median expansions/sec | Median expanded | Median generated | Median solutions |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `SOPMOA` | 1 | 2.00146 | 30,912 | 61,868 | 62,777 | 256 |
+| `SOPMOA_relaxed` | 1 | 2.00100 | 255,575 | 511,412 | 546,582 | 1,283 |
+| `LTMOA` | 1 | 2.00002 | 105,555 | 211,112 | 217,865 | 714 |
+| `LazyLTMOA` | 1 | 2.00002 | 117,660 | 238,166 | 342,488 | 779 |
+| `LTMOA_array` | 1 | 2.00001 | 461,069 | 922,144 | 1,006,260 | 1,885 |
+| `LazyLTMOA_array` | 1 | 2.00094 | 386,745 | 773,827 | 1,341,390 | 1,704 |
+| `EMOA` | 1 | 2.00002 | 220,373 | 440,749 | 465,899 | 1,189 |
+| `NWMOA` | 1 | 2.01987 | 189,676 | 382,975 | 489,887 | 1,078 |
 
-- `SOPMOA_relaxed` matched `LTMOA` exactly on synthetic 2/3/4-objective test graphs for both `-n 1` and `-n 4`.
-- On the NYC benchmark above, `SOPMOA_relaxed` beat `LTMOA` on median wall-clock and processed substantially more labels within the same 2-second budget.
-- Compared with the original `SOPMOA`, `SOPMOA_relaxed` stayed on budget while expanding roughly `5-6x` more labels in the same setup.
+### 4-Thread Scalability
 
-Measured results on this machine:
+This table compares only the solvers that currently consume `-n`.
 
-| Algorithm | Threads used | Runtime (s) | Generated | Expanded | Solutions |
+| Algorithm | 1-thread runtime (s) | 1-thread expansions/sec | 4-thread runtime (s) | 4-thread expansions/sec | Exp/sec scale |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `SOPMOA` | 4 | 2.00611 | 105,082 | 102,946 | 380 |
-| `SOPMOA_relaxed` | 4 | 2.00048 median over 5 runs | about 699,497 avg generated | about 657,426 avg expanded | about 1,395 avg |
-| `LTMOA` | 1 | 3.46159 | 317,047 | 303,935 | 932 |
-| `LazyLTMOA` | 1 | 3.87518 | 455,678 | 304,071 | 932 |
-| `LTMOA_array` | 1 | 3.51381 | 1,074,754 | 982,023 | 1,936 |
-| `LazyLTMOA_array` | 1 | 4.14031 | 1,119,471 | 664,652 | 1,545 |
-| `EMOA` | 1 | 4.14829 | 445,188 | 421,791 | 1,142 |
-| `NWMOA` | 1 | 4.1424 | 454,791 | 357,704 | 1,029 |
+| `SOPMOA` | 2.00146 | 30,912 | 2.00170 | 65,168 | 2.11x |
+| `SOPMOA_relaxed` | 2.00100 | 255,575 | 2.00584 | 801,846 | 3.14x |
 
 Observed locally:
 
-- `LTMOA_array` produced the largest number of solutions in the one-shot serial comparison.
-- `SOPMOA_relaxed` achieved the best wall-clock among the exact solvers tested repeatedly in the new 5-run comparison.
-- `SOPMOA_bucket` was not included in the table because it aborted locally with exit code `134` and produced no CSV output on the same query.
+- `LTMOA_array` remains the fastest exact baseline in the fair 1-thread comparison.
+- `SOPMOA_relaxed` is substantially faster than `LTMOA`, `LazyLTMOA`, and the original `SOPMOA`, but still trails the array-based baselines on single-thread throughput.
+- On this NYC query, the current `SOPMOA_relaxed` also beats `LTMOA_array` once `-n 4` is enabled, reaching about `1.74x` the serial `LTMOA_array` throughput under the same 2-second wall-clock budget.
+- The latest work-first scheduler plus blocked skyline backend improved `SOPMOA_relaxed` scalability from roughly `1.10x` to about `3.14x` on this benchmark query.
+- Runtime is now close to the requested `2s` for every solver, so throughput (`expansions/sec`) is the more meaningful comparison column.
+
+### Longer Diverse Suite
+
+The single-query benchmark above is useful for stability checks, but it is too narrow to judge cross-query behavior. The repository now also includes `scripts/benchmark_suite.py` for longer budgets and multiple scenario files.
+
+Canonical all-solver suite command:
+
+```bash
+mkdir -p output/bench-suite
+
+python3 scripts/benchmark_suite.py \
+  --scenario-files scen/query2.json scen/query3.json scen/query4.json scen/query5.json scen/query6.json \
+  --queries-per-scenario 1 \
+  --time-limit 5 \
+  --runs 1 | tee output/bench-suite/full-suite.txt
+```
+
+Focused head-to-head run measured locally on April 4, 2026:
+
+- suite: first `2` queries from each of `scen/query2.json` to `scen/query6.json`
+- total query families: `10`
+- budget: `--timelimit 5`
+- repeats: `1`
+- compared solvers: `SOPMOA_relaxed` and `LTMOA_array`
+
+Command:
+
+```bash
+mkdir -p output/bench-suite
+
+python3 scripts/benchmark_suite.py \
+  --algorithms SOPMOA_relaxed LTMOA_array \
+  --scenario-files scen/query2.json scen/query3.json scen/query4.json scen/query5.json scen/query6.json \
+  --queries-per-scenario 2 \
+  --time-limit 5 \
+  --runs 1 | tee output/bench-suite/relaxed-vs-ltmoa-array.txt
+```
+
+Aggregate result on that suite:
+
+| Pair | Queries | Median exp/sec ratio | Median expanded ratio | Exp/sec wins | Solution wins |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `SOPMOA_relaxed (1t)` vs `LTMOA_array (1t)` | 10 | 0.54x | 0.88x | 0-10 | 0-5 |
+| `SOPMOA_relaxed (4t)` vs `LTMOA_array (1t)` | 10 | 1.14x | 2.15x | 7-3 | 0-7 |
+
+Aggregate medians for the same suite:
+
+| Algorithm | Threads | Queries | Median runtime (s) | Median expansions/sec | Median expanded | Median generated | Median solutions |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `SOPMOA_relaxed` | 1 | 10 | 4.72818 | 174,323 | 467,745 | 575,001 | 1,840 |
+| `SOPMOA_relaxed` | 4 | 10 | 5.00474 | 447,528 | 1,827,848 | 2,160,692 | 688 |
+| `LTMOA_array` | 1 | 10 | 2.68740 | 385,109 | 836,463 | 997,235 | 2,134 |
+
+Interpretation:
+
+- On this broader 10-query suite, `SOPMOA_relaxed` still loses to `LTMOA_array` at `1` thread, but its `4`-thread configuration now pulls ahead on aggregate throughput.
+- The larger suite is materially harsher than the single NYC query: `SOPMOA_relaxed` wins throughput on `7/10` queries at `4` threads, not all of them.
+- Several `LTMOA_array` runs finish before the 5-second budget, so runtime becomes meaningful again in the diverse-suite setting, not just `expansions/sec`.
+
+If you want a heavier suite, increase `--queries-per-scenario`, `--runs`, and `--time-limit`. For example, `--queries-per-scenario 2 --runs 2 --time-limit 10` gives a much stronger but longer local benchmark.
 
 ## Project Layout
 
@@ -283,6 +318,7 @@ Observed locally:
 ├── CMakeLists.txt
 ├── README.md
 ├── run_command.txt
+├── scripts/
 ├── inc/
 │   ├── algorithms/
 │   ├── problem/
