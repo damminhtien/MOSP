@@ -70,12 +70,6 @@ private:
     }
 };
 
-template class Gcl_tree<1>;
-template class Gcl_tree<2>;
-template class Gcl_tree<3>;
-template class Gcl_tree<4>;
-template class Gcl_tree<5>;
-
 template<int N>
 struct AVL_Node {
     CostVec<N> key;
@@ -255,5 +249,11 @@ private:
     }
 
 };
+
+template class Gcl_tree<1>;
+template class Gcl_tree<2>;
+template class Gcl_tree<3>;
+template class Gcl_tree<4>;
+template class Gcl_tree<5>;
 
 #endif

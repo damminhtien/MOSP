@@ -1,25 +1,35 @@
-project (MOSP_SOPMOA)
-cmake_minimum_required (VERSION 2.6)
+cmake_minimum_required(VERSION 3.16)
+project(MOSP_SOPMOA LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
-SET(CMAKE_CXX_COMPILER "/usr/bin/g++")
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-SET(CMAKE_LINKER  "/usr/bin/ld")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -DOS_MAC")
-SET(CMAKE_CXX_FLAGS_DEBUG  "${CMAKE_CXX_FLAGS} -g -Wall")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -g -Wall")
+
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 OLD)
+endif()
+
+set(Boost_NO_BOOST_CMAKE ON)
 
 include_directories("inc")
 file(GLOB SOURCES "src/algorithms/*.cpp" "src/problem/*.cpp" "src/utils/*.cpp")
 
-find_package( Boost REQUIRED COMPONENTS program_options log thread filesystem system)
+find_package(Boost REQUIRED COMPONENTS program_options)
 include_directories( ${Boost_INCLUDE_DIRS} )
 
 message(${CMAKE_BINARY_DIR})
 
 add_executable(main src/main.cpp ${SOURCES} ${GCL_NDT_SOURCES})
-target_link_libraries(main ${Boost_LIBRARIES})
+target_link_libraries(main PRIVATE ${Boost_LIBRARIES})
+
+if(APPLE)
+    target_compile_definitions(main PRIVATE OS_MAC)
+endif()
 
 find_package(OpenMP REQUIRED)
 target_link_libraries(main PUBLIC OpenMP::OpenMP_CXX)
@@ -27,4 +37,3 @@ target_link_libraries(main PUBLIC OpenMP::OpenMP_CXX)
 # sudo apt install libtbb-dev
 find_package(TBB REQUIRED)
 target_link_libraries(main PUBLIC TBB::tbb)
-
