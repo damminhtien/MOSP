@@ -11,8 +11,7 @@ SOPMOA_relaxed<N>::SOPMOA_relaxed(
 : AbstractSolver(adj_matrix, start_node, target_node),
 heuristic(Heuristic<N>(target_node, inv_graph)),
 num_threads(num_threads > 0 ? num_threads : std::max(1u, std::thread::hardware_concurrency())),
-gcl_ptr(std::make_unique<Gcl_relaxed<N>>(adj_matrix.get_num_node())),
-target_snapshot(std::make_shared<const typename Gcl_relaxed<N>::Snapshot>()) {
+gcl_ptr(std::make_unique<Gcl_relaxed<N>>(adj_matrix.get_num_node())) {
     initialize_workers();
 }
 
@@ -23,6 +22,7 @@ void SOPMOA_relaxed<N>::initialize_workers() {
     for (int i = 0; i < num_threads; i++) {
         workers.push_back(std::make_unique<WorkerState>());
         workers.back()->heap.reserve(256);
+        workers.back()->pending_outboxes.resize(num_threads);
     }
 }
 
@@ -33,6 +33,10 @@ void SOPMOA_relaxed<N>::solve(unsigned int time_limit) {
     inflight_labels.store(0, std::memory_order_relaxed);
     stop_requested.store(false, std::memory_order_relaxed);
     total_steals = 0;
+    total_inbox_batch_flushes = 0;
+    total_inbox_labels_flushed = 0;
+    total_target_checks = 0;
+    total_node_checks = 0;
     total_frontier_check_ns = 0;
     solutions.clear();
 
@@ -41,7 +45,17 @@ void SOPMOA_relaxed<N>::solve(unsigned int time_limit) {
         worker->local_generated = 0;
         worker->local_expanded = 0;
         worker->local_steals = 0;
+        worker->local_inbox_batch_flushes = 0;
+        worker->local_inbox_labels_flushed = 0;
+        worker->local_target_checks = 0;
+        worker->local_node_checks = 0;
         worker->frontier_check_ns = 0;
+        for (auto & batch : worker->pending_outboxes) {
+            batch.size = 0;
+        }
+
+        InboxBatch stale_batch;
+        while (worker->inbox.try_pop(stale_batch)) {}
     }
 
     search_start = std::chrono::steady_clock::now();
@@ -70,13 +84,31 @@ void SOPMOA_relaxed<N>::solve(unsigned int time_limit) {
         num_generation += worker->local_generated;
         num_expansion += worker->local_expanded;
         total_steals += worker->local_steals;
+        total_inbox_batch_flushes += worker->local_inbox_batch_flushes;
+        total_inbox_labels_flushed += worker->local_inbox_labels_flushed;
+        total_target_checks += worker->local_target_checks;
+        total_node_checks += worker->local_node_checks;
         total_frontier_check_ns += worker->frontier_check_ns;
     }
 
     collect_final_solutions();
 
+    auto frontier_sizes = gcl_ptr->live_frontier_sizes();
+    size_t median_frontier_size = 0;
+    if (!frontier_sizes.empty()) {
+        auto mid = frontier_sizes.begin() + frontier_sizes.size() / 2;
+        std::nth_element(frontier_sizes.begin(), mid, frontier_sizes.end());
+        median_frontier_size = *mid;
+    }
+
     std::cout << "Num steal: " << total_steals << std::endl;
     std::cout << "Frontier check time: " << (double(total_frontier_check_ns) / 1e6) << " ms" << std::endl;
+    std::cout << "Target frontier checks: " << total_target_checks << std::endl;
+    std::cout << "Node frontier checks: " << total_node_checks << std::endl;
+    std::cout << "Inbox batch flushes: " << total_inbox_batch_flushes << std::endl;
+    std::cout << "Inbox labels flushed: " << total_inbox_labels_flushed << std::endl;
+    std::cout << "Frontier compactions: " << gcl_ptr->get_compaction_count() << std::endl;
+    std::cout << "Median frontier size: " << median_frontier_size << std::endl;
 }
 
 template<int N>
@@ -112,10 +144,28 @@ void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, unsigned int time_limit) {
         }
 
         if (batch.empty()) {
+            flush_all_outboxes(worker_id);
+            drain_inbox(worker_id);
+
+            {
+                auto & worker = *workers[worker_id];
+                std::lock_guard<std::mutex> guard(worker.heap_lock);
+                while (batch.size() < BATCH_SIZE && !worker.heap.empty()) {
+                    std::pop_heap(worker.heap.begin(), worker.heap.end(), typename Label<N>::lex_larger_for_PQ());
+                    batch.push_back(worker.heap.back());
+                    worker.heap.pop_back();
+                }
+            }
+        }
+
+        if (batch.empty()) {
+            flush_all_outboxes(worker_id);
+
             Label<N>* stolen = nullptr;
             if (steal_label(worker_id, rng, stolen)) {
                 batch.push_back(stolen);
             } else {
+                flush_all_outboxes(worker_id);
                 if (inflight_labels.load(std::memory_order_acquire) == 0) {
                     break;
                 }
@@ -129,7 +179,10 @@ void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, unsigned int time_limit) {
                 break;
             }
             process_label(worker_id, label, time_limit);
+            flush_all_outboxes(worker_id);
         }
+
+        flush_all_outboxes(worker_id);
     }
 }
 
@@ -165,19 +218,14 @@ void SOPMOA_relaxed<N>::process_label(size_t worker_id, Label<N>* curr, unsigned
         return;
     }
 
-    auto curr_h = heuristic(curr->node);
-    CostVec<N> curr_g;
-    for (int i = 0; i < N; i++) {
-        curr_g[i] = curr->f[i] - curr_h[i];
-    }
-
+    const CostVec<N>& curr_h = heuristic(curr->node);
     const std::vector<Edge> &outgoing_edges = graph[curr->node];
     for (auto it = outgoing_edges.begin(); it != outgoing_edges.end(); ++it) {
-        size_t succ_node = it->tail;
-        auto succ_h = heuristic(succ_node);
+        const size_t succ_node = it->tail;
+        const CostVec<N>& succ_h = heuristic(succ_node);
         CostVec<N> succ_f;
         for (int i = 0; i < N; i++) {
-            succ_f[i] = curr_g[i] + it->cost[i] + succ_h[i];
+            succ_f[i] = curr->f[i] + it->cost[i] + succ_h[i] - curr_h[i];
         }
 
         const bool should_check_sol = succ_f != curr->f;
@@ -204,39 +252,59 @@ void SOPMOA_relaxed<N>::enqueue_label(size_t worker_id, size_t owner_id, Label<N
         return;
     }
 
-    owner.inbox.push(label);
+    InboxBatch& pending = workers[worker_id]->pending_outboxes[owner_id];
+    pending.labels[pending.size++] = label;
+    if (pending.size == REMOTE_BATCH_SIZE) {
+        flush_outbox(worker_id, owner_id);
+    }
+}
+
+template<int N>
+void SOPMOA_relaxed<N>::flush_outbox(size_t worker_id, size_t owner_id) {
+    InboxBatch& pending = workers[worker_id]->pending_outboxes[owner_id];
+    if (pending.size == 0) { return; }
+
+    workers[owner_id]->inbox.push(pending);
+    workers[worker_id]->local_inbox_batch_flushes++;
+    workers[worker_id]->local_inbox_labels_flushed += pending.size;
+    pending.size = 0;
+}
+
+template<int N>
+void SOPMOA_relaxed<N>::flush_all_outboxes(size_t worker_id) {
+    for (size_t owner_id = 0; owner_id < workers[worker_id]->pending_outboxes.size(); owner_id++) {
+        if (owner_id == worker_id) { continue; }
+        flush_outbox(worker_id, owner_id);
+    }
 }
 
 template<int N>
 void SOPMOA_relaxed<N>::drain_inbox(size_t worker_id, size_t limit) {
     auto & worker = *workers[worker_id];
-    std::vector<Label<N>*> inbox_batch;
-    inbox_batch.reserve(limit);
+    std::vector<Label<N>*> inbox_labels;
+    inbox_labels.reserve(limit);
 
-    Label<N>* label = nullptr;
-    while (inbox_batch.size() < limit && worker.inbox.try_pop(label)) {
-        inbox_batch.push_back(label);
+    InboxBatch batch;
+    while (inbox_labels.size() < limit && worker.inbox.try_pop(batch)) {
+        for (size_t i = 0; i < batch.size; i++) {
+            inbox_labels.push_back(batch.labels[i]);
+        }
     }
 
-    if (inbox_batch.empty()) { return; }
+    if (inbox_labels.empty()) { return; }
 
     std::lock_guard<std::mutex> guard(worker.heap_lock);
-    for (auto * item : inbox_batch) {
-        worker.heap.push_back(item);
-        std::push_heap(worker.heap.begin(), worker.heap.end(), typename Label<N>::lex_larger_for_PQ());
+    const size_t old_size = worker.heap.size();
+    worker.heap.insert(worker.heap.end(), inbox_labels.begin(), inbox_labels.end());
+
+    if (inbox_labels.size() <= 8) {
+        for (size_t i = old_size; i < worker.heap.size(); i++) {
+            std::push_heap(worker.heap.begin(), worker.heap.begin() + i + 1, typename Label<N>::lex_larger_for_PQ());
+        }
+        return;
     }
-}
 
-template<int N>
-bool SOPMOA_relaxed<N>::pop_local(size_t worker_id, Label<N>* &label) {
-    auto & worker = *workers[worker_id];
-    std::lock_guard<std::mutex> guard(worker.heap_lock);
-    if (worker.heap.empty()) { return false; }
-
-    std::pop_heap(worker.heap.begin(), worker.heap.end(), typename Label<N>::lex_larger_for_PQ());
-    label = worker.heap.back();
-    worker.heap.pop_back();
-    return true;
+    std::make_heap(worker.heap.begin(), worker.heap.end(), typename Label<N>::lex_larger_for_PQ());
 }
 
 template<int N>
@@ -278,8 +346,8 @@ bool SOPMOA_relaxed<N>::steal_label(size_t worker_id, std::minstd_rand& rng, Lab
 template<int N>
 bool SOPMOA_relaxed<N>::target_dominated(size_t worker_id, const CostVec<N>& cost) {
     auto start_check = std::chrono::steady_clock::now();
-    auto snapshot = std::atomic_load_explicit(&target_snapshot, std::memory_order_acquire);
-    bool dominated = gcl_ptr->snapshot_check(snapshot, cost);
+    workers[worker_id]->local_target_checks++;
+    bool dominated = gcl_ptr->frontier_check(target_node, cost);
     auto end_check = std::chrono::steady_clock::now();
     workers[worker_id]->frontier_check_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(end_check - start_check).count();
     return dominated;
@@ -288,6 +356,7 @@ bool SOPMOA_relaxed<N>::target_dominated(size_t worker_id, const CostVec<N>& cos
 template<int N>
 bool SOPMOA_relaxed<N>::node_dominated(size_t worker_id, size_t node, const CostVec<N>& cost) {
     auto start_check = std::chrono::steady_clock::now();
+    workers[worker_id]->local_node_checks++;
     bool dominated = gcl_ptr->frontier_check(node, cost);
     auto end_check = std::chrono::steady_clock::now();
     workers[worker_id]->frontier_check_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(end_check - start_check).count();
@@ -296,18 +365,7 @@ bool SOPMOA_relaxed<N>::node_dominated(size_t worker_id, size_t node, const Cost
 
 template<int N>
 bool SOPMOA_relaxed<N>::frontier_update(size_t node, const CostVec<N>& cost, double time_found) {
-    bool inserted = gcl_ptr->frontier_update(node, cost, time_found);
-    if (inserted && node == target_node) {
-        publish_target_snapshot();
-    }
-    return inserted;
-}
-
-template<int N>
-void SOPMOA_relaxed<N>::publish_target_snapshot() {
-    auto snapshot = gcl_ptr->snapshot(target_node);
-    std::shared_ptr<const typename Gcl_relaxed<N>::Snapshot> const_snapshot(snapshot);
-    std::atomic_store_explicit(&target_snapshot, const_snapshot, std::memory_order_release);
+    return gcl_ptr->frontier_update(node, cost, time_found);
 }
 
 template<int N>
@@ -317,9 +375,8 @@ void SOPMOA_relaxed<N>::collect_final_solutions() {
     solutions.reserve(snapshot->size());
 
     for (const auto & entry : *snapshot) {
-        CostVec<N> cost = entry.to_cost();
         solutions.emplace_back(
-            std::vector<cost_t>(cost.begin(), cost.end()),
+            std::vector<cost_t>(entry.cost.begin(), entry.cost.end()),
             entry.time_found
         );
     }

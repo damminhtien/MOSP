@@ -1,7 +1,7 @@
 #include "problem/graph.h"
 
-AdjacencyMatrix::AdjacencyMatrix(size_t num_node, std::vector<Edge> &edges, bool reverse)
-: matrix(num_node, std::vector<Edge>()), num_obj(edges[0].cost.size()), num_node(num_node) {
+AdjacencyMatrix::AdjacencyMatrix(size_t num_node, size_t num_obj, std::vector<Edge> &edges, bool reverse)
+: matrix(num_node, std::vector<Edge>()), num_obj(num_obj), num_node(num_node) {
     num_edge = 0;
     for (auto it = edges.begin(); it != edges.end(); it++) {
         if (it->head >= num_node || it->tail >= num_node) { continue; }
@@ -25,4 +25,3 @@ std::vector<Edge>& AdjacencyMatrix::operator[](size_t node) {
 const std::vector<Edge>& AdjacencyMatrix::operator[](size_t node) const {
     return this->matrix.at(node);
 }
-

@@ -6,53 +6,73 @@
 
 #include <atomic>
 #include <memory>
-#include <shared_mutex>
+#include <mutex>
 
-template<int N, size_t HOT_CACHE_SIZE = 4>
+template<int N, size_t HOT_CACHE_SIZE = 4, size_t INITIAL_CAPACITY = 8>
 class Gcl_relaxed {
 public:
     struct FrontEntry {
-        cost_t f0 = 0;
-        CostVec<N - 1> tail{};
+        CostVec<N> cost{};
+        std::atomic<uint8_t> alive{0};
         double time_found = -1.0;
 
         FrontEntry() = default;
 
-        explicit FrontEntry(const CostVec<N>& cost, double found_time = -1.0)
-        : f0(cost[0]), time_found(found_time) {
-            for (int i = 0; i < N - 1; i++) {
-                tail[i] = cost[i + 1];
-            }
+        FrontEntry(const CostVec<N>& cost, double time_found)
+        : cost(cost), time_found(time_found) {
+            alive.store(1, std::memory_order_relaxed);
         }
 
-        CostVec<N> to_cost() const {
-            CostVec<N> cost;
-            cost[0] = f0;
-            for (int i = 0; i < N - 1; i++) {
-                cost[i + 1] = tail[i];
-            }
-            return cost;
+        FrontEntry(const FrontEntry& other)
+        : cost(other.cost), time_found(other.time_found) {
+            alive.store(other.alive.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        }
+
+        FrontEntry& operator=(const FrontEntry& other) {
+            if (this == &other) { return *this; }
+            cost = other.cost;
+            time_found = other.time_found;
+            alive.store(other.alive.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            return *this;
         }
     };
 
-    using Snapshot = std::vector<FrontEntry>;
+    struct SnapshotEntry {
+        CostVec<N> cost{};
+        double time_found = -1.0;
+    };
+
+    using Snapshot = std::vector<SnapshotEntry>;
 
     explicit Gcl_relaxed(size_t num_node)
     : frontiers(num_node + 1) {}
 
-    std::string get_name() const { return "relaxed_vector"; }
+    std::string get_name() const { return "optimistic_vector"; }
 
     inline bool frontier_check(size_t node, const CostVec<N>& cost) const {
         if (node >= frontiers.size()) { return false; }
 
-        FrontEntry candidate(cost);
-        std::shared_lock<std::shared_mutex> guard(frontiers[node].lock);
-        return is_dominated_locked(frontiers[node], candidate);
-    }
+        const Storage* storage = frontiers[node].active.load(std::memory_order_acquire);
+        if (storage == nullptr) { return false; }
 
-    inline bool snapshot_check(const std::shared_ptr<const Snapshot>& snapshot, const CostVec<N>& cost) const {
-        if (!snapshot) { return false; }
-        return is_dominated_in_entries(*snapshot, FrontEntry(cost));
+        const size_t published_size = storage->published_size.load(std::memory_order_acquire);
+        const size_t hot_cache_size = storage->hot_cache_size.load(std::memory_order_acquire);
+        for (size_t i = 0; i < hot_cache_size; i++) {
+            const size_t idx = storage->hot_cache_idx[i].load(std::memory_order_relaxed);
+            if (idx >= published_size) { continue; }
+
+            const FrontEntry& entry = storage->entries[idx];
+            if (entry.alive.load(std::memory_order_acquire) == 0) { continue; }
+            if (weakly_dominate<N>(entry.cost, cost)) { return true; }
+        }
+
+        for (size_t idx = 0; idx < published_size; idx++) {
+            const FrontEntry& entry = storage->entries[idx];
+            if (entry.alive.load(std::memory_order_acquire) == 0) { continue; }
+            if (weakly_dominate<N>(entry.cost, cost)) { return true; }
+        }
+
+        return false;
     }
 
     inline bool frontier_update(size_t node, const CostVec<N>& cost, double time_found = -1.0) {
@@ -62,98 +82,186 @@ public:
             return false;
         }
 
-        FrontEntry candidate(cost, time_found);
         NodeFrontier& frontier = frontiers[node];
-        std::unique_lock<std::shared_mutex> guard(frontier.lock);
+        std::lock_guard<std::mutex> guard(frontier.writer_lock);
 
-        if (is_dominated_locked(frontier, candidate)) { return false; }
+        Storage* storage = frontier.active.load(std::memory_order_acquire);
+        std::vector<size_t> dominated_indices;
+        dominated_indices.reserve(8);
 
-        auto it = std::upper_bound(
-            frontier.entries.begin(),
-            frontier.entries.end(),
-            candidate.f0,
-            [](cost_t value, const FrontEntry& entry) {
-                return value < entry.f0;
-            }
-        );
+        if (storage != nullptr) {
+            const size_t published_size = storage->published_size.load(std::memory_order_acquire);
+            for (size_t idx = 0; idx < published_size; idx++) {
+                const FrontEntry& entry = storage->entries[idx];
+                if (entry.alive.load(std::memory_order_acquire) == 0) { continue; }
 
-        frontier.entries.insert(it, candidate);
-        frontier.entries.erase(
-            std::remove_if(
-                frontier.entries.begin(),
-                frontier.entries.end(),
-                [&candidate](const FrontEntry& entry) {
-                    if (entry.f0 == candidate.f0 && entry.tail == candidate.tail) {
-                        return false;
-                    }
-                    return dominates(candidate, entry);
+                if (weakly_dominate<N>(entry.cost, cost)) {
+                    return false;
                 }
-            ),
-            frontier.entries.end()
-        );
+                if (weakly_dominate<N>(cost, entry.cost)) {
+                    dominated_indices.push_back(idx);
+                }
+            }
+        }
 
-        refresh_hot_cache(frontier);
+        const size_t projected_live = frontier.live_count + 1 - dominated_indices.size();
+        const size_t projected_dead = frontier.dead_count + dominated_indices.size();
+        const bool need_compact = storage != nullptr
+            && storage->published_size.load(std::memory_order_relaxed) >= 32
+            && projected_dead >= projected_live;
+        const bool need_grow = storage == nullptr
+            || storage->published_size.load(std::memory_order_relaxed) == storage->capacity;
+
+        if (need_grow || need_compact) {
+            const size_t next_capacity = std::max(
+                INITIAL_CAPACITY,
+                std::max(projected_live, size_t(1)) * 2
+            );
+            auto next_storage = std::make_unique<Storage>(next_capacity);
+            size_t next_size = 0;
+
+            if (storage != nullptr) {
+                const size_t published_size = storage->published_size.load(std::memory_order_acquire);
+                for (size_t idx = 0; idx < published_size; idx++) {
+                    const FrontEntry& entry = storage->entries[idx];
+                    if (entry.alive.load(std::memory_order_acquire) == 0) { continue; }
+                    if (weakly_dominate<N>(cost, entry.cost)) { continue; }
+
+                    next_storage->entries[next_size] = entry;
+                    next_storage->entries[next_size].alive.store(1, std::memory_order_relaxed);
+                    next_size++;
+                }
+            }
+
+            next_storage->entries[next_size] = FrontEntry(cost, time_found);
+            next_size++;
+            next_storage->published_size.store(next_size, std::memory_order_release);
+
+            if (need_compact) {
+                num_compactions.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            if (frontier.active_owner) {
+                frontier.retired.push_back(std::move(frontier.active_owner));
+            }
+            frontier.active_owner = std::move(next_storage);
+            frontier.active.store(frontier.active_owner.get(), std::memory_order_release);
+            frontier.live_count = next_size;
+            frontier.dead_count = 0;
+            refresh_hot_cache_locked(frontier, next_size - 1);
+            return true;
+        }
+
+        for (size_t idx : dominated_indices) {
+            storage->entries[idx].alive.store(0, std::memory_order_release);
+        }
+        frontier.dead_count += dominated_indices.size();
+        frontier.live_count -= dominated_indices.size();
+
+        const size_t next_idx = storage->published_size.load(std::memory_order_relaxed);
+        storage->entries[next_idx] = FrontEntry(cost, time_found);
+        storage->published_size.store(next_idx + 1, std::memory_order_release);
+        frontier.live_count++;
+        refresh_hot_cache_locked(frontier, next_idx);
         return true;
     }
 
     inline std::shared_ptr<Snapshot> snapshot(size_t node) const {
+        auto result = std::make_shared<Snapshot>();
         if (node >= frontiers.size()) {
-            return std::make_shared<Snapshot>();
+            return result;
         }
 
-        std::shared_lock<std::shared_mutex> guard(frontiers[node].lock);
-        return std::make_shared<Snapshot>(frontiers[node].entries.begin(), frontiers[node].entries.end());
+        const Storage* storage = frontiers[node].active.load(std::memory_order_acquire);
+        if (storage == nullptr) {
+            return result;
+        }
+
+        const size_t published_size = storage->published_size.load(std::memory_order_acquire);
+        result->reserve(frontiers[node].live_count);
+        for (size_t idx = 0; idx < published_size; idx++) {
+            const FrontEntry& entry = storage->entries[idx];
+            if (entry.alive.load(std::memory_order_acquire) == 0) { continue; }
+
+            result->push_back({entry.cost, entry.time_found});
+        }
+        return result;
+    }
+
+    inline size_t get_compaction_count() const {
+        return num_compactions.load(std::memory_order_relaxed);
+    }
+
+    inline std::vector<size_t> live_frontier_sizes() const {
+        std::vector<size_t> sizes;
+        sizes.reserve(frontiers.size());
+        for (const auto& frontier : frontiers) {
+            if (frontier.live_count > 0) {
+                sizes.push_back(frontier.live_count);
+            }
+        }
+        return sizes;
     }
 
 private:
-    struct NodeFrontier {
-        std::vector<FrontEntry> entries;
-        std::array<FrontEntry, HOT_CACHE_SIZE> hot_cache{};
-        size_t hot_cache_size = 0;
-        mutable std::shared_mutex lock;
-
-        NodeFrontier() {
-            entries.reserve(16);
+    struct Storage {
+        explicit Storage(size_t capacity)
+        : entries(new FrontEntry[capacity]), capacity(capacity) {
+            for (auto& idx : hot_cache_idx) {
+                idx.store(std::numeric_limits<size_t>::max(), std::memory_order_relaxed);
+            }
         }
+
+        std::unique_ptr<FrontEntry[]> entries;
+        size_t capacity;
+        std::atomic<size_t> published_size{0};
+        std::array<std::atomic<size_t>, HOT_CACHE_SIZE> hot_cache_idx{};
+        std::atomic<size_t> hot_cache_size{0};
     };
 
-    static inline bool dominates(const FrontEntry& lhs, const FrontEntry& rhs) {
-        return lhs.f0 <= rhs.f0 && weakly_dominate<N - 1>(lhs.tail, rhs.tail);
-    }
+    struct NodeFrontier {
+        std::atomic<Storage*> active{nullptr};
+        std::unique_ptr<Storage> active_owner;
+        std::vector<std::unique_ptr<Storage>> retired;
+        size_t live_count = 0;
+        size_t dead_count = 0;
+        mutable std::mutex writer_lock;
+    };
 
-    static inline bool is_dominated_in_entries(const Snapshot& entries, const FrontEntry& candidate) {
-        auto it_ub = std::upper_bound(
-            entries.begin(),
-            entries.end(),
-            candidate.f0,
-            [](cost_t value, const FrontEntry& entry) {
-                return value < entry.f0;
+    inline void refresh_hot_cache_locked(NodeFrontier& frontier, size_t preferred_idx) {
+        Storage* storage = frontier.active.load(std::memory_order_relaxed);
+        if (storage == nullptr) { return; }
+
+        const size_t published_size = storage->published_size.load(std::memory_order_relaxed);
+        std::array<size_t, HOT_CACHE_SIZE> picks{};
+        size_t picked = 0;
+
+        auto remember = [&](size_t idx) {
+            if (idx >= published_size) { return; }
+            if (storage->entries[idx].alive.load(std::memory_order_relaxed) == 0) { return; }
+
+            for (size_t i = 0; i < picked; i++) {
+                if (picks[i] == idx) { return; }
             }
-        );
+            picks[picked++] = idx;
+        };
 
-        for (auto it = entries.begin(); it != it_ub; ++it) {
-            if (dominates(*it, candidate)) { return true; }
+        remember(preferred_idx);
+        for (size_t idx = published_size; idx > 0 && picked < HOT_CACHE_SIZE; idx--) {
+            remember(idx - 1);
         }
-        return false;
-    }
 
-    static inline bool is_dominated_locked(const NodeFrontier& frontier, const FrontEntry& candidate) {
-        for (size_t i = 0; i < frontier.hot_cache_size; i++) {
-            if (dominates(frontier.hot_cache[i], candidate)) {
-                return true;
-            }
+        for (size_t i = 0; i < picked; i++) {
+            storage->hot_cache_idx[i].store(picks[i], std::memory_order_relaxed);
         }
-        return is_dominated_in_entries(frontier.entries, candidate);
-    }
-
-    static inline void refresh_hot_cache(NodeFrontier& frontier) {
-        frontier.hot_cache_size = std::min(frontier.entries.size(), HOT_CACHE_SIZE);
-        for (size_t i = 0; i < frontier.hot_cache_size; i++) {
-            frontier.hot_cache[i] = frontier.entries[i];
+        for (size_t i = picked; i < HOT_CACHE_SIZE; i++) {
+            storage->hot_cache_idx[i].store(std::numeric_limits<size_t>::max(), std::memory_order_relaxed);
         }
+        storage->hot_cache_size.store(picked, std::memory_order_release);
     }
 
     std::vector<NodeFrontier> frontiers;
+    std::atomic<size_t> num_compactions{0};
 };
 
 template class Gcl_relaxed<2>;

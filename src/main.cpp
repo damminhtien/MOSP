@@ -129,17 +129,18 @@ int main(int argc, char* argv[]) {
     srand((int)time(0));
 
     size_t num_node;
+    size_t num_obj;
     std::vector<Edge> edges;
 
     for (auto file_path : cost_files){
         std::cout << file_path << std::endl;
     }
 
-    read_graph_files(cost_files, num_node, edges);
+    read_graph_files(cost_files, num_node, num_obj, edges);
     std::cout << "Num node: " << num_node << std::endl;
 
-    AdjacencyMatrix graph(num_node, edges);
-    AdjacencyMatrix inv_graph(num_node, edges, true);
+    AdjacencyMatrix graph(num_node, num_obj, edges);
+    AdjacencyMatrix inv_graph(num_node, num_obj, edges, true);
 
     std::ofstream stats;
     stats.open(vm["output"].as<std::string>(), std::fstream::app);

@@ -33,7 +33,8 @@ public:
 private:
     static constexpr size_t BATCH_SIZE = 8;
     static constexpr size_t STEAL_K = 2;
-    static constexpr size_t INBOX_DRAIN_LIMIT = 64;
+    static constexpr size_t REMOTE_BATCH_SIZE = 16;
+    static constexpr size_t INBOX_DRAIN_LIMIT = 128;
     static constexpr size_t LABEL_BLOCK_SIZE = 4096;
 
     template<size_t BLOCK_SIZE>
@@ -71,14 +72,24 @@ private:
         size_t next_index = BLOCK_SIZE;
     };
 
+    struct InboxBatch {
+        std::array<Label<N>*, REMOTE_BATCH_SIZE> labels{};
+        size_t size = 0;
+    };
+
     struct WorkerState {
         std::vector<Label<N>*> heap;
-        tbb::concurrent_queue<Label<N>*> inbox;
+        tbb::concurrent_queue<InboxBatch> inbox;
+        std::vector<InboxBatch> pending_outboxes;
         std::mutex heap_lock;
         LabelArena<LABEL_BLOCK_SIZE> arena;
         size_t local_generated = 0;
         size_t local_expanded = 0;
         size_t local_steals = 0;
+        size_t local_inbox_batch_flushes = 0;
+        size_t local_inbox_labels_flushed = 0;
+        size_t local_target_checks = 0;
+        size_t local_node_checks = 0;
         long long frontier_check_ns = 0;
     };
 
@@ -87,8 +98,11 @@ private:
     std::vector<std::unique_ptr<WorkerState>> workers;
     std::atomic<size_t> inflight_labels{0};
     std::atomic<bool> stop_requested{false};
-    std::shared_ptr<const typename Gcl_relaxed<N>::Snapshot> target_snapshot;
     size_t total_steals = 0;
+    size_t total_inbox_batch_flushes = 0;
+    size_t total_inbox_labels_flushed = 0;
+    size_t total_target_checks = 0;
+    size_t total_node_checks = 0;
     long long total_frontier_check_ns = 0;
     std::chrono::steady_clock::time_point search_start;
 
@@ -98,13 +112,13 @@ private:
     void worker_loop(size_t worker_id, unsigned int time_limit);
     void process_label(size_t worker_id, Label<N>* curr, unsigned int time_limit);
     void enqueue_label(size_t worker_id, size_t owner_id, Label<N>* label);
+    void flush_outbox(size_t worker_id, size_t owner_id);
+    void flush_all_outboxes(size_t worker_id);
     void drain_inbox(size_t worker_id, size_t limit = INBOX_DRAIN_LIMIT);
-    bool pop_local(size_t worker_id, Label<N>* &label);
     bool steal_label(size_t worker_id, std::minstd_rand& rng, Label<N>* &label);
     bool target_dominated(size_t worker_id, const CostVec<N>& cost);
     bool node_dominated(size_t worker_id, size_t node, const CostVec<N>& cost);
     bool frontier_update(size_t node, const CostVec<N>& cost, double time_found = -1.0);
-    void publish_target_snapshot();
     void collect_final_solutions();
 };
 

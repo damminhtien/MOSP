@@ -1,8 +1,15 @@
 #include"utils/data_io.h"
 
-void read_graph_files(std::vector<std::string> file_paths, size_t &num_node, std::vector<Edge> &edges) {
+void read_graph_files(std::vector<std::string> file_paths, size_t &num_node, size_t &num_obj, std::vector<Edge> &edges) {
     size_t max_node_id = 0;
-    for (std::string file_path : file_paths) {
+    num_obj = file_paths.size();
+    if (num_obj > Edge::MAX_NUM_OBJ) {
+        perror(("Too many objective files: " + std::to_string(num_obj)).c_str());
+        exit(EXIT_FAILURE);
+    }
+
+    for (size_t obj_idx = 0; obj_idx < file_paths.size(); obj_idx++) {
+        const std::string& file_path = file_paths[obj_idx];
         std::ifstream gr_file;
         gr_file.open(file_path);
         if(!gr_file.is_open()) {
@@ -32,16 +39,18 @@ void read_graph_files(std::vector<std::string> file_paths, size_t &num_node, std
                         perror(("Graph file inconsistency " + file_path).c_str());
                         exit(EXIT_FAILURE);
                     }
-                    edges[edge_id].cost.push_back(weight);
+                    edges[edge_id].cost[obj_idx] = weight;
                 } else { // Read from first graph file
-                    Edge edge(head, tail, {weight});
+                    Edge edge(head, tail);
+                    edge.cost[obj_idx] = weight;
                     edges.push_back(edge);
 
                     if (head > max_node_id) { max_node_id = head; }
                     if (tail > max_node_id) { max_node_id = tail; }
                 }
+
+                edge_id++;
             }
-            edge_id++;
         }
         gr_file.close();
     }
