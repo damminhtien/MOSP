@@ -19,10 +19,10 @@ void LTMOA<N>::solve(unsigned int time_limit) {
     open.push_back(curr);
     std::push_heap(open.begin(), open.end(), comparator);
 
-    auto start_time = std::clock();
+    const auto start_time = wall_now();
 
     while (!open.empty()) {
-        if ((std::clock() - start_time)/CLOCKS_PER_SEC > time_limit){ return; }
+        if (time_limit_exceeded(start_time, time_limit)){ return; }
 
         std::pop_heap(open.begin(), open.end(), comparator);
         curr = open.back();
@@ -41,7 +41,7 @@ void LTMOA<N>::solve(unsigned int time_limit) {
 
         if (curr->node == target_node) {
             std::vector<cost_t> cost(curr->f.begin(), curr->f.end());
-            solutions.emplace_back(cost, std::clock() - start_time);
+            solutions.emplace_back(cost, elapsed_seconds(start_time));
             continue;
         }
 

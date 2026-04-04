@@ -13,6 +13,7 @@ void SOPMOA<N>::solve(unsigned int time_limit) {
 
     all_labels.push_back(start_label);
     open.push(start_label);
+    search_start = wall_now();
 
     #pragma omp parallel for num_threads(num_threads)
     for (int i = 0; i < num_threads; i++) {
@@ -22,8 +23,6 @@ void SOPMOA<N>::solve(unsigned int time_limit) {
 
 template <int N>
 void SOPMOA<N>::thread_solve(int thread_ID, unsigned int time_limit) {
-    auto start_time = omp_get_wtime(); 
-    
     Label<N>* curr;
     Label<N>* succ;
 
@@ -31,7 +30,7 @@ void SOPMOA<N>::thread_solve(int thread_ID, unsigned int time_limit) {
         is_thread_activating.begin(), is_thread_activating.end(), 
         [](bool activated) { return activated; }
     )) {
-        if ((omp_get_wtime() - start_time) > time_limit) {
+        if (time_limit_exceeded(search_start, time_limit)) {
             is_thread_activating[thread_ID] = false;
             return;
         }
@@ -55,7 +54,7 @@ void SOPMOA<N>::thread_solve(int thread_ID, unsigned int time_limit) {
         if (curr->node == target_node) {
             std::vector<cost_t> cost(curr->f.begin(), curr->f.end());
             sols_lock.lock();
-            solutions.emplace_back(cost, std::clock() - start_time);
+            solutions.emplace_back(cost, elapsed_seconds(search_start));
             sols_lock.unlock();
             continue;
         }

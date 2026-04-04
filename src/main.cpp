@@ -54,11 +54,13 @@ void single_run(AdjacencyMatrix& graph, AdjacencyMatrix&inv_graph, size_t start_
     solver->solve(time_limit);
     auto end_time_ = std::chrono::steady_clock::now();
     double runtime = (end_time_ - start_time_) / 1.0s;
+    double expansions_per_sec = runtime > 0.0 ? double(solver->get_num_expansion()) / runtime : 0.0;
 
     std::cout << "Num solution: " << solver->solutions.size() << std::endl;
     std::cout << "Num expansion: " << solver->get_num_expansion() << std::endl;
     std::cout << "Num generation: " << solver->get_num_generation() << std::endl;
     std::cout << "Runtime: " << runtime << std::endl;
+    std::cout << "Expansions/sec: " << expansions_per_sec << std::endl;
 
     output << solver->get_result_str() << "," << runtime << std::endl;
 

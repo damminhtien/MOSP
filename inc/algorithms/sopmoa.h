@@ -44,6 +44,7 @@ private:
     tbb::concurrent_priority_queue<Label<N>*, typename Label<N>::lex_larger_for_PQ> open;
     std::mutex sols_lock;
     std::array<bool, NUM_THREADS> is_thread_activating;
+    TimePoint search_start;
 
     virtual void thread_solve(int thread_ID, unsigned int time_limit);
 };

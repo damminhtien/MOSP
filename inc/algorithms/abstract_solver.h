@@ -17,6 +17,9 @@ struct Solution {
 
 class AbstractSolver {
 public:
+    using WallClock = std::chrono::steady_clock;
+    using TimePoint = WallClock::time_point;
+
     std::vector<Solution> solutions;
     
     AbstractSolver(AdjacencyMatrix &adj_matrix, size_t start_node, size_t target_node)
@@ -68,6 +71,18 @@ protected:
 
     size_t start_node;
     size_t target_node;
+
+    static TimePoint wall_now() {
+        return WallClock::now();
+    }
+
+    static double elapsed_seconds(const TimePoint& start_time) {
+        return std::chrono::duration<double>(wall_now() - start_time).count();
+    }
+
+    static bool time_limit_exceeded(const TimePoint& start_time, unsigned int time_limit) {
+        return time_limit != UINT_MAX && elapsed_seconds(start_time) > static_cast<double>(time_limit);
+    }
 };
 
 #endif

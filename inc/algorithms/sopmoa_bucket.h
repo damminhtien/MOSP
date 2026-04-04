@@ -47,6 +47,7 @@ private:
     std::mutex open_lock;
     std::mutex sols_lock;
     std::array<bool, NUM_THREADS_> is_thread_activating;
+    TimePoint search_start;
 
     virtual void thread_solve(int thread_ID, unsigned int time_limit);
 };

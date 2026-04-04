@@ -28,11 +28,11 @@ void NWMOA<N>::solve(unsigned int time_limit) {
 
     open.push(curr);
 
-    auto start_time = std::clock();
+    const auto start_time = wall_now();
         // std::cout << "HERE0\n";
 
     while (!open.empty()) {
-        if ((std::clock() - start_time)/CLOCKS_PER_SEC > time_limit){ return; }
+        if (time_limit_exceeded(start_time, time_limit)){ return; }
 
         // std::pop_heap(open.begin(), open.end(), comparator);
         // curr = open.back();
@@ -67,7 +67,7 @@ void NWMOA<N>::solve(unsigned int time_limit) {
                 } else { rit++; }
             }
             std::vector<cost_t> cost(curr->f.begin(), curr->f.end());
-            solutions.emplace_back(cost, std::clock() - start_time);
+            solutions.emplace_back(cost, elapsed_seconds(start_time));
             continue;
         }
 
