@@ -1,7 +1,7 @@
 #include"algorithms/lazy_ltmoa_array.h"
 
 template<int N>
-void LazyLTMOA_array<N>::solve(unsigned int time_limit) {
+void LazyLTMOA_array<N>::solve(double time_limit) {
     std::cout << "start LazyLTMOA_array\n";
 
     Label<N>* curr;

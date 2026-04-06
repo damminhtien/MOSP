@@ -1,0 +1,161 @@
+#include <cassert>
+
+#include "algorithms/abstract_solver.h"
+#include "algorithms/ltmoa.h"
+#include "problem/graph.h"
+#include "utils/benchmark_metrics.h"
+
+namespace {
+
+std::array<cost_t, Edge::MAX_NUM_OBJ> edge_costs(cost_t c1, cost_t c2) {
+    std::array<cost_t, Edge::MAX_NUM_OBJ> values{};
+    values.fill(0);
+    values[0] = c1;
+    values[1] = c2;
+    return values;
+}
+
+std::string read_file(const std::filesystem::path& file_path) {
+    std::ifstream input(file_path);
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    return buffer.str();
+}
+
+void run_recorder_subcase(const std::filesystem::path& root) {
+    BenchmarkRecorder recorder;
+
+    RunMetrics metadata;
+    metadata.solver_name = "RecorderOnly";
+    metadata.dataset_id = "unit,dataset";
+    metadata.query_id = "query\"alpha";
+    metadata.start_node = 1;
+    metadata.target_node = 9;
+    metadata.num_objectives = 2;
+    metadata.threads_requested = 1;
+    metadata.threads_effective = 1;
+    metadata.budget_sec = 3.5;
+    metadata.seed = "42,seed";
+
+    recorder.configure(metadata, 0);
+    recorder.set_frontier_artifact_path(root / "recorder_frontier.csv");
+    recorder.set_trace_artifact_path(root / "recorder_trace.csv");
+
+    ThreadLocalSink& sink = recorder.main_thread_sink();
+    sink.on_label_generated(1, 1);
+    sink.on_label_generated(2, 2);
+    sink.on_pruned_by_target();
+    sink.on_label_expanded(2, 2);
+    sink.on_target_hit_raw();
+
+    std::vector<FrontierPoint> frontier = {
+        {{2, 10}, 0.1},
+        {{10, 2}, 0.2},
+    };
+    recorder.on_frontier_check_target();
+    recorder.on_frontier_check_node();
+    recorder.on_frontier_update();
+    recorder.on_target_frontier_changed(frontier, "frontier,change");
+    recorder.set_status(RunStatus::completed);
+    RunMetrics finalized = recorder.finalize(frontier);
+
+    recorder.write_summary_row(root / "summary.csv");
+    recorder.write_frontier_csv(root / "recorder_frontier.csv");
+    recorder.write_trace_csv(root / "recorder_trace.csv");
+
+    assert(finalized.completed);
+    assert(finalized.status == RunStatus::completed);
+    assert(finalized.counters.generated_labels == 2);
+    assert(finalized.counters.expanded_labels == 1);
+    assert(finalized.counters.pruned_by_target == 1);
+    assert(finalized.counters.target_hits_raw == 1);
+    assert(finalized.counters.final_frontier_size == 2);
+    assert(finalized.time_to_first_solution_sec >= 0.0);
+
+    const std::string summary_text = read_file(root / "summary.csv");
+    const std::string frontier_text = read_file(root / "recorder_frontier.csv");
+    const std::string trace_text = read_file(root / "recorder_trace.csv");
+
+    assert(summary_text.find("schema_version,solver_name,dataset_id,query_id") != std::string::npos);
+    assert(summary_text.find("RecorderOnly") != std::string::npos);
+    assert(summary_text.find("\"unit,dataset\"") != std::string::npos);
+    assert(summary_text.find("\"query\"\"alpha\"") != std::string::npos);
+    assert(summary_text.find("\"42,seed\"") != std::string::npos);
+    assert(frontier_text.find("time_found_sec,obj1,obj2") != std::string::npos);
+    assert(frontier_text.find("0.1,2,10") != std::string::npos);
+    assert(trace_text.find("time_sec,trigger,frontier_size") != std::string::npos);
+    assert(trace_text.find("\"frontier,change\"") != std::string::npos);
+}
+
+void run_ltmoa_subcase(const std::filesystem::path& root) {
+    std::vector<Edge> edges;
+    edges.push_back(Edge(0, 1, edge_costs(1, 5)));
+    edges.push_back(Edge(1, 3, edge_costs(1, 5)));
+    edges.push_back(Edge(0, 2, edge_costs(5, 1)));
+    edges.push_back(Edge(2, 3, edge_costs(5, 1)));
+    edges.push_back(Edge(0, 3, edge_costs(6, 6)));
+    edges.push_back(Edge(1, 2, edge_costs(1, 1)));
+    edges.push_back(Edge(2, 1, edge_costs(1, 1)));
+
+    AdjacencyMatrix graph(4, 2, edges);
+    AdjacencyMatrix inv_graph(4, 2, edges, true);
+
+    std::shared_ptr<AbstractSolver> solver = get_LTMOA_solver(graph, inv_graph, 0, 3);
+
+    BenchmarkRunConfig config;
+    config.dataset_id = "toy_graph";
+    config.query_id = "toy_0_3";
+    config.threads_requested = 1;
+    config.threads_effective = 1;
+    config.budget_sec = 5.0;
+    config.trace_interval_ms = 0;
+    solver->configure_benchmark_run(config);
+    solver->set_benchmark_frontier_artifact_path(root / "ltmoa_frontier.csv");
+    solver->set_benchmark_trace_artifact_path(root / "ltmoa_trace.csv");
+
+    solver->solve(5.0);
+    if (!solver->benchmark_status_set()) {
+        solver->set_benchmark_status(RunStatus::completed);
+    }
+    RunMetrics metrics = solver->finalize_benchmark_run();
+
+    solver->benchmark_recorder().write_frontier_csv(root / "ltmoa_frontier.csv");
+    solver->benchmark_recorder().write_trace_csv(root / "ltmoa_trace.csv");
+    solver->benchmark_recorder().write_summary_row(root / "summary.csv");
+
+    assert(metrics.status == RunStatus::completed);
+    assert(metrics.completed);
+    assert(metrics.counters.generated_labels >= metrics.counters.expanded_labels);
+    assert(metrics.counters.final_frontier_size > 0);
+    assert(metrics.counters.target_hits_raw >= metrics.counters.final_frontier_size);
+    assert(metrics.counters.peak_open_size > 0);
+    assert(metrics.counters.peak_live_labels > 0);
+    assert(metrics.time_to_first_solution_sec >= 0.0);
+    assert(metrics.time_to_first_solution_sec <= metrics.runtime_sec);
+    assert(metrics.final_frontier.size() == metrics.counters.final_frontier_size);
+
+    const std::string frontier_text = read_file(root / "ltmoa_frontier.csv");
+    assert(frontier_text.find("time_found_sec,obj1,obj2") != std::string::npos);
+    assert(frontier_text.find(",2,10") != std::string::npos);
+    assert(frontier_text.find(",10,2") != std::string::npos);
+
+    if (metrics.final_frontier.size() >= 2) {
+        assert(metrics.final_frontier[0].cost[0] <= metrics.final_frontier[1].cost[0]);
+    }
+}
+
+}  // namespace
+
+int main() {
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() / ("sopmoa_benchmark_metrics_smoke_" + std::to_string(static_cast<long long>(std::time(nullptr))));
+
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+
+    run_recorder_subcase(root);
+    run_ltmoa_subcase(root);
+
+    std::filesystem::remove_all(root);
+    return 0;
+}

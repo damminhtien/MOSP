@@ -7,6 +7,8 @@
 template<int N>
 class Gcl {
 public:
+    using Snapshot = std::vector<CostVec<N>>;
+
     Gcl(size_t num_node) : gcl(num_node + 1) {};
     std::string get_name(){ return "list"; }
     
@@ -19,11 +21,17 @@ public:
         return false;
     }
 
-    inline void frontier_update(size_t node, const CostVec<N> & cost) {
+    inline bool frontier_update(size_t node, const CostVec<N> & cost) {
         if (node >= gcl.size()) { 
             perror(("Invalid Gcl index " + std::to_string(node)).c_str());
             exit(EXIT_FAILURE);
-            return; 
+            return false; 
+        }
+
+        for (const auto& existing : gcl[node]) {
+            if (weakly_dominate<N>(existing, cost)) {
+                return false;
+            }
         }
 
         auto it = gcl[node].begin();
@@ -34,6 +42,18 @@ public:
         }
 
         gcl[node].push_front(cost);
+        return true;
+    }
+
+    inline Snapshot snapshot(size_t node) const {
+        Snapshot copy;
+        if (node >= gcl.size()) { return copy; }
+
+        copy.reserve(gcl[node].size());
+        for (const auto& cost : gcl[node]) {
+            copy.push_back(cost);
+        }
+        return copy;
     }
 
 private:

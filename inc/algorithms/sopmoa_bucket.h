@@ -34,7 +34,7 @@ public:
     }
 
     virtual std::string get_name() override {return "SOPMOA_bucket(" + std::to_string(N)+"obj|"+ std::to_string(num_threads)+"threads)-" + gcl_ptr->get_name(); }
-    void solve(unsigned int time_limit=UINT_MAX) override;
+    void solve(double time_limit = std::numeric_limits<double>::infinity()) override;
 
 private:
     int num_threads;
@@ -48,7 +48,7 @@ private:
     std::mutex sols_lock;
     std::array<bool, NUM_THREADS_> is_thread_activating;
 
-    virtual void thread_solve(int thread_ID, unsigned int time_limit);
+    virtual void thread_solve(int thread_ID, double time_limit);
 };
 
 std::shared_ptr<AbstractSolver> get_SOPMOA_bucket_solver(

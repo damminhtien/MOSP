@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(MOSP_SOPMOA LANGUAGES CXX)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -37,3 +39,16 @@ target_link_libraries(main PUBLIC OpenMP::OpenMP_CXX)
 # sudo apt install libtbb-dev
 find_package(TBB REQUIRED)
 target_link_libraries(main PUBLIC TBB::tbb)
+
+if(BUILD_TESTING)
+    add_executable(
+        benchmark_metrics_smoke
+        tests/benchmark_metrics_smoke.cpp
+        src/algorithms/ltmoa.cpp
+        src/problem/graph.cpp
+        src/problem/heuristic.cpp
+        src/utils/benchmark_metrics.cpp
+    )
+    target_include_directories(benchmark_metrics_smoke PRIVATE inc)
+    add_test(NAME benchmark_metrics_smoke COMMAND benchmark_metrics_smoke)
+endif()

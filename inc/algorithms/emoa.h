@@ -22,7 +22,7 @@ public:
     ~EMOA() { for (auto ptr : all_labels){ delete ptr; } }
 
     virtual std::string get_name() override {return "EMOA(" + std::to_string(N)+"obj)-" + gcl_ptr->get_name(); }
-    void solve(unsigned int time_limit=UINT_MAX) override;
+    void solve(double time_limit = std::numeric_limits<double>::infinity()) override;
     
 private:
     std::list<Label<N>*> all_labels;

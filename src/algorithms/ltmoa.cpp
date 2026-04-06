@@ -1,8 +1,13 @@
 #include"algorithms/ltmoa.h"
 
 template<int N>
-void LTMOA<N>::solve(unsigned int time_limit) {
+void LTMOA<N>::solve(double time_limit) {
     std::cout << "start LTMOA\n";
+
+    solutions.clear();
+    target_frontier_.clear();
+    num_generation = 0;
+    num_expansion = 0;
 
     Label<N>* curr;
     Label<N>* succ;
@@ -11,6 +16,15 @@ void LTMOA<N>::solve(unsigned int time_limit) {
     std::vector<Label<N>*> open;
     std::make_heap(open.begin(), open.end(), comparator);
 
+    auto rebuild_solution_cache = [this]() {
+        const std::vector<FrontierPoint> sorted_frontier = sort_frontier_lexicographically(target_frontier_);
+        solutions.clear();
+        solutions.reserve(sorted_frontier.size());
+        for (const FrontierPoint& point : sorted_frontier) {
+            solutions.emplace_back(point.cost, point.time_found_sec);
+        }
+    };
+
     CostVec<N> start_g;
     start_g.fill(0);
     curr = new Label<N>(start_node, start_g, heuristic(start_node));
@@ -18,31 +32,91 @@ void LTMOA<N>::solve(unsigned int time_limit) {
     all_labels.push_back(curr);
     open.push_back(curr);
     std::push_heap(open.begin(), open.end(), comparator);
+    num_generation++;
 
-    auto start_time = std::clock();
+    ThreadLocalSink* sink = nullptr;
+    if (benchmark_enabled()) {
+        sink = &benchmark_recorder().main_thread_sink();
+        sink->on_label_generated(open.size(), all_labels.size());
+    }
+
+    const auto local_start_time = BenchmarkClock::now();
+    auto elapsed_seconds = [this, &local_start_time]() {
+        if (benchmark_enabled()) {
+            return benchmark_recorder().elapsed_sec();
+        }
+        return BenchmarkClock::seconds_since(local_start_time);
+    };
+    const double trace_interval_sec = static_cast<double>(benchmark_trace_interval_ms()) / 1000.0;
+    double next_trace_sample_sec = trace_interval_sec > 0.0 ? trace_interval_sec : std::numeric_limits<double>::infinity();
 
     while (!open.empty()) {
-        if ((std::clock() - start_time)/CLOCKS_PER_SEC > time_limit){ return; }
+        const double elapsed_sec = elapsed_seconds();
+        if (elapsed_sec > time_limit) {
+            rebuild_solution_cache();
+            if (benchmark_enabled()) {
+                set_benchmark_status(RunStatus::timeout);
+            }
+            return;
+        }
+
+        if (sink != nullptr && trace_interval_sec > 0.0 && !target_frontier_.empty() && elapsed_sec >= next_trace_sample_sec) {
+            benchmark_recorder().on_target_frontier_changed(target_frontier_, "interval_sample");
+            next_trace_sample_sec += trace_interval_sec;
+        }
 
         std::pop_heap(open.begin(), open.end(), comparator);
         curr = open.back();
         open.pop_back();
-
-        num_generation++;
+        if (sink != nullptr) {
+            sink->observe_open_size(open.size());
+        }
 
         auto curr_f_tr = truncate<N>(curr->f);
         if (curr->should_check_sol) {
-            if (gcl_ptr->frontier_check(target_node, curr_f_tr)) { continue; }
+            if (benchmark_enabled()) {
+                benchmark_recorder().on_frontier_check_target();
+            }
+            if (gcl_ptr->frontier_check(target_node, curr_f_tr)) {
+                if (sink != nullptr) {
+                    sink->on_pruned_by_target();
+                }
+                continue;
+            }
         }
-        if (gcl_ptr->frontier_check(curr->node, curr_f_tr)) { continue; }
+        if (benchmark_enabled()) {
+            benchmark_recorder().on_frontier_check_node();
+        }
+        if (gcl_ptr->frontier_check(curr->node, curr_f_tr)) {
+            if (sink != nullptr) {
+                sink->on_pruned_by_node();
+            }
+            continue;
+        }
 
+        if (benchmark_enabled()) {
+            benchmark_recorder().on_frontier_update();
+        }
         gcl_ptr->frontier_update(curr->node, curr_f_tr);
-        num_expansion++;
 
         if (curr->node == target_node) {
             std::vector<cost_t> cost(curr->f.begin(), curr->f.end());
-            solutions.emplace_back(cost, std::clock() - start_time);
+            FrontierPoint point{cost, elapsed_sec};
+            if (sink != nullptr) {
+                sink->on_target_hit_raw();
+            }
+            if (insert_nondominated_frontier_point(target_frontier_, point)) {
+                rebuild_solution_cache();
+                if (benchmark_enabled()) {
+                    benchmark_recorder().on_target_frontier_changed(target_frontier_, "target_accept");
+                }
+            }
             continue;
+        }
+
+        num_expansion++;
+        if (sink != nullptr) {
+            sink->on_label_expanded(open.size(), all_labels.size());
         }
 
         auto curr_h = heuristic(curr->node);
@@ -61,9 +135,25 @@ void LTMOA<N>::solve(unsigned int time_limit) {
 
             auto succ_f_tr = truncate<N>(succ_f);
             if (should_check_sol) {
-                if (gcl_ptr->frontier_check(target_node, succ_f_tr)) { continue; }
+                if (benchmark_enabled()) {
+                    benchmark_recorder().on_frontier_check_target();
+                }
+                if (gcl_ptr->frontier_check(target_node, succ_f_tr)) {
+                    if (sink != nullptr) {
+                        sink->on_pruned_by_target();
+                    }
+                    continue;
+                }
             }
-            if (gcl_ptr->frontier_check(succ_node, succ_f_tr)) { continue; }
+            if (benchmark_enabled()) {
+                benchmark_recorder().on_frontier_check_node();
+            }
+            if (gcl_ptr->frontier_check(succ_node, succ_f_tr)) {
+                if (sink != nullptr) {
+                    sink->on_pruned_by_node();
+                }
+                continue;
+            }
 
             succ = new Label<N>(succ_node, succ_f);
             succ->should_check_sol = should_check_sol;
@@ -71,7 +161,16 @@ void LTMOA<N>::solve(unsigned int time_limit) {
             all_labels.push_back(succ);
             open.push_back(succ);
             std::push_heap(open.begin(), open.end(), comparator);
+            num_generation++;
+            if (sink != nullptr) {
+                sink->on_label_generated(open.size(), all_labels.size());
+            }
         }
+    }
+
+    rebuild_solution_cache();
+    if (benchmark_enabled()) {
+        set_benchmark_status(RunStatus::completed);
     }
 }
 

@@ -1,7 +1,7 @@
 #include"algorithms/ltmoa_array.h"
 
 template<int N>
-void LTMOA_array<N>::solve(unsigned int time_limit) {
+void LTMOA_array<N>::solve(double time_limit) {
     std::cout << "start LTMOA_array\n";
 
     Label<N>* curr;

@@ -1,7 +1,7 @@
 #include"algorithms/emoa.h"
 
 template<int N>
-void EMOA<N>::solve(unsigned int time_limit) {
+void EMOA<N>::solve(double time_limit) {
     std::cout << "start EMOA\n";
 
     Label<N>* curr;

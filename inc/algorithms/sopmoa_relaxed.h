@@ -28,7 +28,7 @@ public:
         return "SOPMOA_relaxed(" + std::to_string(N) + "obj|" + std::to_string(num_threads) + "threads)-" + gcl_ptr->get_name();
     }
 
-    void solve(unsigned int time_limit = UINT_MAX) override;
+    void solve(double time_limit = std::numeric_limits<double>::infinity()) override;
 
 private:
     static constexpr size_t BATCH_SIZE = 8;
@@ -109,8 +109,8 @@ private:
     inline size_t owner_of(size_t node) const { return node % num_threads; }
 
     void initialize_workers();
-    void worker_loop(size_t worker_id, unsigned int time_limit);
-    void process_label(size_t worker_id, Label<N>* curr, unsigned int time_limit);
+    void worker_loop(size_t worker_id, double time_limit);
+    void process_label(size_t worker_id, Label<N>* curr, double time_limit);
     void enqueue_label(size_t worker_id, size_t owner_id, Label<N>* label);
     void flush_outbox(size_t worker_id, size_t owner_id);
     void flush_all_outboxes(size_t worker_id);

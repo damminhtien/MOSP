@@ -1,7 +1,7 @@
 #include"algorithms/nwmoa.h"
 
 template<int N>
-void NWMOA<N>::solve(unsigned int time_limit) {
+void NWMOA<N>::solve(double time_limit) {
     std::cout << "start NWMOA\n";
 
     Label<N>* curr;

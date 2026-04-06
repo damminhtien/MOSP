@@ -27,7 +27,7 @@ void SOPMOA_relaxed<N>::initialize_workers() {
 }
 
 template<int N>
-void SOPMOA_relaxed<N>::solve(unsigned int time_limit) {
+void SOPMOA_relaxed<N>::solve(double time_limit) {
     std::cout << "start SOPMOA_relaxed " + std::to_string(num_threads) + " threads\n";
 
     inflight_labels.store(0, std::memory_order_relaxed);
@@ -112,7 +112,7 @@ void SOPMOA_relaxed<N>::solve(unsigned int time_limit) {
 }
 
 template<int N>
-void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, unsigned int time_limit) {
+void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, double time_limit) {
     std::minstd_rand rng(static_cast<unsigned int>(worker_id + 1));
 
     while (true) {
@@ -187,7 +187,7 @@ void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, unsigned int time_limit) {
 }
 
 template<int N>
-void SOPMOA_relaxed<N>::process_label(size_t worker_id, Label<N>* curr, unsigned int time_limit) {
+void SOPMOA_relaxed<N>::process_label(size_t worker_id, Label<N>* curr, double time_limit) {
     workers[worker_id]->local_generated++;
 
     const double elapsed = std::chrono::duration<double>(

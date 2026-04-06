@@ -1,7 +1,7 @@
 #include"algorithms/sopmoa_bucket.h"
 
 template<int N>
-void SOPMOA_bucket<N>::solve(unsigned int time_limit) {
+void SOPMOA_bucket<N>::solve(double time_limit) {
     std::cout << "start SOPMOA_bucket " + std::to_string(num_threads) + " threads\n";
 
     is_thread_activating.fill(false);
@@ -22,7 +22,7 @@ void SOPMOA_bucket<N>::solve(unsigned int time_limit) {
 }
 
 template <int N>
-void SOPMOA_bucket<N>::thread_solve(int thread_ID, unsigned int time_limit) {
+void SOPMOA_bucket<N>::thread_solve(int thread_ID, double time_limit) {
     auto start_time = omp_get_wtime(); 
     
     Label<N>* curr;
