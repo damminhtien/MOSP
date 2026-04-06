@@ -175,13 +175,36 @@ void single_run(
         solver->set_benchmark_trace_artifact_path(trace_path);
     }
 
-    solver->solve(budget_sec);
-
     RunMetrics metrics;
     double runtime = BenchmarkClock::seconds_since(external_start);
+    bool failed = false;
+    std::string failure_message;
+
+    try {
+        solver->solve(budget_sec);
+    } catch (const std::bad_alloc& ex) {
+        failed = true;
+        failure_message = std::string("Solver ran out of memory: ") + ex.what();
+        if (use_canonical_output) {
+            solver->set_benchmark_status(RunStatus::oom);
+        }
+    } catch (const std::exception& ex) {
+        failed = true;
+        failure_message = std::string("Solver aborted with exception: ") + ex.what();
+        if (use_canonical_output) {
+            solver->set_benchmark_status(RunStatus::aborted);
+        }
+    } catch (...) {
+        failed = true;
+        failure_message = "Solver aborted with unknown exception";
+        if (use_canonical_output) {
+            solver->set_benchmark_status(RunStatus::aborted);
+        }
+    }
+
     if (use_canonical_output) {
         if (!solver->benchmark_status_set()) {
-            solver->set_benchmark_status(RunStatus::completed);
+            solver->set_benchmark_status(failed ? RunStatus::aborted : RunStatus::completed);
         }
         metrics = solver->finalize_benchmark_run();
         runtime = metrics.runtime_sec;
@@ -196,6 +219,11 @@ void single_run(
         if (!summary_output.empty()) {
             solver->benchmark_recorder().write_summary_row(summary_output);
         }
+    }
+
+    if (failed) {
+        std::cerr << failure_message << std::endl;
+        exit(EXIT_FAILURE);
     }
 
     std::cout << "Num solution: " << solver->solutions.size() << std::endl;

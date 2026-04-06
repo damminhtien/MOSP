@@ -4,6 +4,14 @@ template<int N>
 void NWMOA<N>::solve(double time_limit) {
     std::cout << "start NWMOA\n";
 
+    solutions.clear();
+    target_frontier_.clear();
+    num_generation = 0;
+    num_expansion = 0;
+    for (auto& cost : cost_last_truncated) {
+        cost.fill(MAX_COST);
+    }
+
     Label<N>* curr;
     Label<N>* succ;
 
@@ -27,12 +35,39 @@ void NWMOA<N>::solve(double time_limit) {
         // std::cout << "HERE-1\n";
 
     open.push(curr);
+    num_generation++;
 
-    auto start_time = std::clock();
+    ThreadLocalSink* sink = nullptr;
+    if (benchmark_enabled()) {
+        sink = &benchmark_recorder().main_thread_sink();
+        sink->on_label_generated(open.size(), all_labels.size());
+    }
+
+    const auto local_start_time = BenchmarkClock::now();
+    auto elapsed_seconds = [this, &local_start_time]() {
+        if (benchmark_enabled()) {
+            return benchmark_recorder().elapsed_sec();
+        }
+        return BenchmarkClock::seconds_since(local_start_time);
+    };
+    const double trace_interval_sec = static_cast<double>(benchmark_trace_interval_ms()) / 1000.0;
+    double next_trace_sample_sec = trace_interval_sec > 0.0 ? trace_interval_sec : std::numeric_limits<double>::infinity();
         // std::cout << "HERE0\n";
 
     while (!open.empty()) {
-        if ((std::clock() - start_time)/CLOCKS_PER_SEC > time_limit){ return; }
+        const double elapsed_sec = elapsed_seconds();
+        if (elapsed_sec > time_limit) {
+            rebuild_solutions_from_frontier(target_frontier_);
+            if (benchmark_enabled()) {
+                set_benchmark_status(RunStatus::timeout);
+            }
+            return;
+        }
+
+        if (sink != nullptr && trace_interval_sec > 0.0 && !target_frontier_.empty() && elapsed_sec >= next_trace_sample_sec) {
+            benchmark_recorder().on_target_frontier_changed(target_frontier_, "interval_sample");
+            next_trace_sample_sec += trace_interval_sec;
+        }
 
         // std::pop_heap(open.begin(), open.end(), comparator);
         // curr = open.back();
@@ -41,34 +76,67 @@ void NWMOA<N>::solve(double time_limit) {
 
         curr = open.top();
         open.pop();
+        if (sink != nullptr) {
+            sink->observe_open_size(open.size());
+        }
         // std::cout << "HERE2\n";
 
-
-        num_generation++;
-
         auto curr_f_tr = truncate<N>(curr->f);
-        if (weakly_dominate<N-1>(cost_last_truncated[curr->node], curr_f_tr)) { continue; }
-        if (weakly_dominate<N-1>(cost_last_truncated[target_node], curr_f_tr)) { continue; }
-        if (gcl_ptr->frontier_check(curr->node, curr_f_tr)) { continue; }
-        if (gcl_ptr->frontier_check(target_node, curr_f_tr)) { continue; }
+        if (weakly_dominate<N-1>(cost_last_truncated[curr->node], curr_f_tr)) {
+            if (sink != nullptr) {
+                sink->on_pruned_other();
+            }
+            continue;
+        }
+        if (weakly_dominate<N-1>(cost_last_truncated[target_node], curr_f_tr)) {
+            if (sink != nullptr) {
+                sink->on_pruned_other();
+            }
+            continue;
+        }
+        if (benchmark_enabled()) {
+            benchmark_recorder().on_frontier_check_node();
+        }
+        if (gcl_ptr->frontier_check(curr->node, curr_f_tr)) {
+            if (sink != nullptr) {
+                sink->on_pruned_by_node();
+            }
+            continue;
+        }
+        if (benchmark_enabled()) {
+            benchmark_recorder().on_frontier_check_target();
+        }
+        if (gcl_ptr->frontier_check(target_node, curr_f_tr)) {
+            if (sink != nullptr) {
+                sink->on_pruned_by_target();
+            }
+            continue;
+        }
 
+        if (benchmark_enabled()) {
+            benchmark_recorder().on_frontier_update();
+        }
         gcl_ptr->frontier_update(curr->node, curr_f_tr);
         cost_last_truncated[curr->node] = curr_f_tr;
-        num_expansion++;
 
         if (curr->node == target_node) {
-            auto rit = solutions.rbegin();
-            while (rit != solutions.rend()) {
-                CostVec<N> temp_cost;
-                std::copy(rit->cost.begin(), rit->cost.end(), temp_cost.begin());
-                if (curr->f[0] != temp_cost[0]) { break; }
-                if (weakly_dominate<N>(curr->f, temp_cost)) {
-                    rit = decltype(rit)(solutions.erase(std::next(rit).base()));
-                } else { rit++; }
-            }
             std::vector<cost_t> cost(curr->f.begin(), curr->f.end());
-            solutions.emplace_back(cost, std::clock() - start_time);
+            FrontierPoint point{cost, elapsed_sec};
+            if (sink != nullptr) {
+                sink->on_target_hit_raw();
+            }
+            if (insert_nondominated_frontier_point(target_frontier_, point)) {
+                rebuild_solutions_from_frontier(target_frontier_);
+                if (benchmark_enabled()) {
+                    benchmark_recorder().on_target_frontier_changed(target_frontier_, "target_accept");
+                }
+            }
             continue;
+        }
+
+        num_expansion++;
+        if (sink != nullptr) {
+            sink->on_label_expanded(open.size(), all_labels.size());
         }
 
         auto curr_h = heuristic(curr->node);
@@ -83,8 +151,18 @@ void NWMOA<N>::solve(double time_limit) {
             for (int i = 0; i < N; i++){ succ_f[i] = curr_g[i] + it->cost[i] + succ_h[i]; }
         
             auto succ_f_tr = truncate<N>(succ_f);
-            if (weakly_dominate<N-1>(cost_last_truncated[succ_node], succ_f_tr)) { continue; }
-            if (weakly_dominate<N-1>(cost_last_truncated[target_node], succ_f_tr)) { continue; }
+            if (weakly_dominate<N-1>(cost_last_truncated[succ_node], succ_f_tr)) {
+                if (sink != nullptr) {
+                    sink->on_pruned_other();
+                }
+                continue;
+            }
+            if (weakly_dominate<N-1>(cost_last_truncated[target_node], succ_f_tr)) {
+                if (sink != nullptr) {
+                    sink->on_pruned_other();
+                }
+                continue;
+            }
 
             succ = new Label<N>(succ_node, succ_f);
             all_labels.push_back(succ);
@@ -93,9 +171,18 @@ void NWMOA<N>::solve(double time_limit) {
         // std::cout << "HERE33\n";
 
             open.push(succ);
+            num_generation++;
+            if (sink != nullptr) {
+                sink->on_label_generated(open.size(), all_labels.size());
+            }
         // std::cout << "HERE44\n";
 
         }
+    }
+
+    rebuild_solutions_from_frontier(target_frontier_);
+    if (benchmark_enabled()) {
+        set_benchmark_status(RunStatus::completed);
     }
 }
 

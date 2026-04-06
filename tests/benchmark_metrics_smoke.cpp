@@ -1,7 +1,17 @@
 #include <cassert>
+#include <cmath>
+#include <functional>
 
 #include "algorithms/abstract_solver.h"
+#include "algorithms/emoa.h"
+#include "algorithms/lazy_ltmoa.h"
+#include "algorithms/lazy_ltmoa_array.h"
 #include "algorithms/ltmoa.h"
+#include "algorithms/ltmoa_array.h"
+#include "algorithms/nwmoa.h"
+#include "algorithms/sopmoa.h"
+#include "algorithms/sopmoa_bucket.h"
+#include "algorithms/sopmoa_relaxed.h"
 #include "problem/graph.h"
 #include "utils/benchmark_metrics.h"
 
@@ -48,16 +58,20 @@ void run_recorder_subcase(const std::filesystem::path& root) {
     sink.on_label_expanded(2, 2);
     sink.on_target_hit_raw();
 
-    std::vector<FrontierPoint> frontier = {
+    std::vector<FrontierPoint> frontier_a = {
+        {{2, 10}, 0.1},
+    };
+    std::vector<FrontierPoint> frontier_b = {
         {{2, 10}, 0.1},
         {{10, 2}, 0.2},
     };
+
     recorder.on_frontier_check_target();
     recorder.on_frontier_check_node();
-    recorder.on_frontier_update();
-    recorder.on_target_frontier_changed(frontier, "frontier,change");
+    recorder.on_target_frontier_changed(frontier_a, "frontier,change");
+    recorder.on_target_frontier_changed(frontier_b, "frontier,change");
     recorder.set_status(RunStatus::completed);
-    RunMetrics finalized = recorder.finalize(frontier);
+    RunMetrics finalized = recorder.finalize(frontier_b);
 
     recorder.write_summary_row(root / "summary.csv");
     recorder.write_frontier_csv(root / "recorder_frontier.csv");
@@ -71,6 +85,10 @@ void run_recorder_subcase(const std::filesystem::path& root) {
     assert(finalized.counters.target_hits_raw == 1);
     assert(finalized.counters.final_frontier_size == 2);
     assert(finalized.time_to_first_solution_sec >= 0.0);
+    assert(finalized.anytime_trace.size() == 2);
+    assert(std::isfinite(finalized.anytime_trace.back().hv_ratio));
+    assert(finalized.anytime_trace.back().hv_ratio == 1.0);
+    assert(finalized.anytime_trace.back().recall == 1.0);
 
     const std::string summary_text = read_file(root / "summary.csv");
     const std::string frontier_text = read_file(root / "recorder_frontier.csv");
@@ -87,7 +105,7 @@ void run_recorder_subcase(const std::filesystem::path& root) {
     assert(trace_text.find("\"frontier,change\"") != std::string::npos);
 }
 
-void run_ltmoa_subcase(const std::filesystem::path& root) {
+AdjacencyMatrix make_graph() {
     std::vector<Edge> edges;
     edges.push_back(Edge(0, 1, edge_costs(1, 5)));
     edges.push_back(Edge(1, 3, edge_costs(1, 5)));
@@ -96,51 +114,87 @@ void run_ltmoa_subcase(const std::filesystem::path& root) {
     edges.push_back(Edge(0, 3, edge_costs(6, 6)));
     edges.push_back(Edge(1, 2, edge_costs(1, 1)));
     edges.push_back(Edge(2, 1, edge_costs(1, 1)));
+    return AdjacencyMatrix(4, 2, edges);
+}
 
-    AdjacencyMatrix graph(4, 2, edges);
-    AdjacencyMatrix inv_graph(4, 2, edges, true);
+AdjacencyMatrix make_inv_graph() {
+    std::vector<Edge> edges;
+    edges.push_back(Edge(0, 1, edge_costs(1, 5)));
+    edges.push_back(Edge(1, 3, edge_costs(1, 5)));
+    edges.push_back(Edge(0, 2, edge_costs(5, 1)));
+    edges.push_back(Edge(2, 3, edge_costs(5, 1)));
+    edges.push_back(Edge(0, 3, edge_costs(6, 6)));
+    edges.push_back(Edge(1, 2, edge_costs(1, 1)));
+    edges.push_back(Edge(2, 1, edge_costs(1, 1)));
+    return AdjacencyMatrix(4, 2, edges, true);
+}
 
-    std::shared_ptr<AbstractSolver> solver = get_LTMOA_solver(graph, inv_graph, 0, 3);
+void assert_expected_frontier(const RunMetrics& metrics) {
+    assert(metrics.final_frontier.size() == 2);
+    assert(metrics.final_frontier[0].cost == std::vector<cost_t>({2, 10}));
+    assert(metrics.final_frontier[1].cost == std::vector<cost_t>({10, 2}));
+    assert(!metrics.anytime_trace.empty());
+    assert(metrics.anytime_trace.back().recall == 1.0);
+    assert(metrics.anytime_trace.back().hv_ratio == 1.0);
+}
+
+void run_solver_subcase(
+    const std::filesystem::path& root,
+    const std::string& label,
+    const std::function<std::shared_ptr<AbstractSolver>(AdjacencyMatrix&, AdjacencyMatrix&)>& make_solver
+) {
+    AdjacencyMatrix graph = make_graph();
+    AdjacencyMatrix inv_graph = make_inv_graph();
+    std::shared_ptr<AbstractSolver> solver = make_solver(graph, inv_graph);
 
     BenchmarkRunConfig config;
     config.dataset_id = "toy_graph";
-    config.query_id = "toy_0_3";
-    config.threads_requested = 1;
-    config.threads_effective = 1;
+    config.query_id = label;
+    config.threads_requested = 2;
+    config.threads_effective = 2;
     config.budget_sec = 5.0;
-    config.trace_interval_ms = 0;
+    config.trace_interval_ms = 1;
     solver->configure_benchmark_run(config);
-    solver->set_benchmark_frontier_artifact_path(root / "ltmoa_frontier.csv");
-    solver->set_benchmark_trace_artifact_path(root / "ltmoa_trace.csv");
+    solver->set_benchmark_frontier_artifact_path(root / (label + "_frontier.csv"));
+    solver->set_benchmark_trace_artifact_path(root / (label + "_trace.csv"));
 
     solver->solve(5.0);
     if (!solver->benchmark_status_set()) {
         solver->set_benchmark_status(RunStatus::completed);
     }
-    RunMetrics metrics = solver->finalize_benchmark_run();
 
-    solver->benchmark_recorder().write_frontier_csv(root / "ltmoa_frontier.csv");
-    solver->benchmark_recorder().write_trace_csv(root / "ltmoa_trace.csv");
-    solver->benchmark_recorder().write_summary_row(root / "summary.csv");
+    RunMetrics metrics = solver->finalize_benchmark_run();
+    solver->benchmark_recorder().write_frontier_csv(root / (label + "_frontier.csv"));
+    solver->benchmark_recorder().write_trace_csv(root / (label + "_trace.csv"));
+    solver->benchmark_recorder().write_summary_row(root / "solver_summary.csv");
 
     assert(metrics.status == RunStatus::completed);
     assert(metrics.completed);
     assert(metrics.counters.generated_labels >= metrics.counters.expanded_labels);
-    assert(metrics.counters.final_frontier_size > 0);
     assert(metrics.counters.target_hits_raw >= metrics.counters.final_frontier_size);
+    assert(metrics.counters.final_frontier_size > 0);
     assert(metrics.counters.peak_open_size > 0);
     assert(metrics.counters.peak_live_labels > 0);
     assert(metrics.time_to_first_solution_sec >= 0.0);
     assert(metrics.time_to_first_solution_sec <= metrics.runtime_sec);
-    assert(metrics.final_frontier.size() == metrics.counters.final_frontier_size);
+    assert_expected_frontier(metrics);
+}
 
-    const std::string frontier_text = read_file(root / "ltmoa_frontier.csv");
-    assert(frontier_text.find("time_found_sec,obj1,obj2") != std::string::npos);
-    assert(frontier_text.find(",2,10") != std::string::npos);
-    assert(frontier_text.find(",10,2") != std::string::npos);
+void run_solver_matrix_subcase(const std::filesystem::path& root) {
+    const std::vector<std::pair<std::string, std::function<std::shared_ptr<AbstractSolver>(AdjacencyMatrix&, AdjacencyMatrix&)>>> cases = {
+        {"ltmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_solver(graph, inv_graph, 0, 3); }},
+        {"lazy_ltmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LazyLTMOA_solver(graph, inv_graph, 0, 3); }},
+        {"ltmoa_array", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_array_solver(graph, inv_graph, 0, 3); }},
+        {"lazy_ltmoa_array", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LazyLTMOA_array_solver(graph, inv_graph, 0, 3); }},
+        {"emoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_EMOA_solver(graph, inv_graph, 0, 3); }},
+        {"nwmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_NWMOA_solver(graph, inv_graph, 0, 3); }},
+        {"sopmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_SOPMOA_solver(graph, inv_graph, 0, 3, 2); }},
+        {"sopmoa_relaxed", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_SOPMOA_relaxed_solver(graph, inv_graph, 0, 3, 2); }},
+        {"sopmoa_bucket", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_SOPMOA_bucket_solver(graph, inv_graph, 0, 3, 2); }},
+    };
 
-    if (metrics.final_frontier.size() >= 2) {
-        assert(metrics.final_frontier[0].cost[0] <= metrics.final_frontier[1].cost[0]);
+    for (const auto& entry : cases) {
+        run_solver_subcase(root, entry.first, entry.second);
     }
 }
 
@@ -154,7 +208,7 @@ int main() {
     std::filesystem::create_directories(root);
 
     run_recorder_subcase(root);
-    run_ltmoa_subcase(root);
+    run_solver_matrix_subcase(root);
 
     std::filesystem::remove_all(root);
     return 0;

@@ -7,6 +7,8 @@
 template<int N>
 class Gcl_NWMOA {
 public:
+    using Snapshot = std::vector<CostVec<N>>;
+
     Gcl_NWMOA(size_t num_node) : gcl(num_node + 1) {};
     std::string get_name(){ return "custom_list2"; }
 
@@ -20,11 +22,17 @@ public:
         return false;
     }
 
-    inline void frontier_update(size_t node, const CostVec<N> & cost) {
+    inline bool frontier_update(size_t node, const CostVec<N> & cost) {
         if (node >= gcl.size()) { 
             perror(("Invalid Gcl index " + std::to_string(node)).c_str());
             exit(EXIT_FAILURE);
-            return; 
+            return false; 
+        }
+
+        for (const auto& existing : gcl[node]) {
+            if (weakly_dominate<N>(existing, cost)) {
+                return false;
+            }
         }
 
         auto rit = gcl[node].rbegin();
@@ -35,6 +43,18 @@ public:
             } else { rit++; }
         }
         gcl[node].insert(rit.base(), cost);
+        return true;
+    }
+
+    inline Snapshot snapshot(size_t node) const {
+        Snapshot copy;
+        if (node >= gcl.size()) { return copy; }
+
+        copy.reserve(gcl[node].size());
+        for (const auto& cost : gcl[node]) {
+            copy.push_back(cost);
+        }
+        return copy;
     }
 
 private:

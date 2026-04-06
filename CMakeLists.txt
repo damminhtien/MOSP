@@ -44,11 +44,9 @@ if(BUILD_TESTING)
     add_executable(
         benchmark_metrics_smoke
         tests/benchmark_metrics_smoke.cpp
-        src/algorithms/ltmoa.cpp
-        src/problem/graph.cpp
-        src/problem/heuristic.cpp
-        src/utils/benchmark_metrics.cpp
+        ${SOURCES}
     )
     target_include_directories(benchmark_metrics_smoke PRIVATE inc)
+    target_link_libraries(benchmark_metrics_smoke PRIVATE ${Boost_LIBRARIES} OpenMP::OpenMP_CXX TBB::tbb)
     add_test(NAME benchmark_metrics_smoke COMMAND benchmark_metrics_smoke)
 endif()

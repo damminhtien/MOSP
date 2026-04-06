@@ -28,6 +28,7 @@ public:
         return "SOPMOA_relaxed(" + std::to_string(N) + "obj|" + std::to_string(num_threads) + "threads)-" + gcl_ptr->get_name();
     }
 
+    bool supports_canonical_benchmark_output() const override { return true; }
     void solve(double time_limit = std::numeric_limits<double>::infinity()) override;
 
 private:
@@ -83,6 +84,7 @@ private:
         std::vector<InboxBatch> pending_outboxes;
         std::mutex heap_lock;
         LabelArena<LABEL_BLOCK_SIZE> arena;
+        ThreadLocalSink metrics_sink;
         size_t local_generated = 0;
         size_t local_expanded = 0;
         size_t local_steals = 0;
@@ -97,7 +99,21 @@ private:
     std::unique_ptr<Gcl_relaxed<N>> gcl_ptr;
     std::vector<std::unique_ptr<WorkerState>> workers;
     std::atomic<size_t> inflight_labels{0};
+    std::atomic<size_t> queued_labels{0};
+    std::atomic<size_t> allocated_labels{0};
     std::atomic<bool> stop_requested{false};
+    std::atomic<bool> timed_out{false};
+    std::atomic<uint64_t> generated_labels_total_{0};
+    std::atomic<uint64_t> expanded_labels_total_{0};
+    std::atomic<uint64_t> pruned_by_target_total_{0};
+    std::atomic<uint64_t> pruned_by_node_total_{0};
+    std::atomic<uint64_t> pruned_other_total_{0};
+    std::atomic<uint64_t> target_hits_raw_total_{0};
+    std::atomic<uint64_t> target_frontier_checks_total_{0};
+    std::atomic<uint64_t> node_frontier_checks_total_{0};
+    std::atomic<uint64_t> peak_open_size_{0};
+    std::atomic<uint64_t> peak_live_labels_{0};
+    std::atomic<uint64_t> next_trace_sample_ms_{0};
     size_t total_steals = 0;
     size_t total_inbox_batch_flushes = 0;
     size_t total_inbox_labels_flushed = 0;
@@ -105,6 +121,7 @@ private:
     size_t total_node_checks = 0;
     long long total_frontier_check_ns = 0;
     std::chrono::steady_clock::time_point search_start;
+    mutable std::mutex benchmark_trace_lock;
 
     inline size_t owner_of(size_t node) const { return node % num_threads; }
 
@@ -120,6 +137,14 @@ private:
     bool node_dominated(size_t worker_id, size_t node, const CostVec<N>& cost);
     bool frontier_update(size_t node, const CostVec<N>& cost, double time_found = -1.0);
     void collect_final_solutions();
+    void observe_peak(std::atomic<uint64_t>& peak, uint64_t value);
+    CounterSet counter_snapshot() const;
+    void maybe_record_interval_sample(double elapsed_sec);
+    std::vector<FrontierPoint> snapshot_frontier_points(size_t node) const;
+
+    std::vector<FrontierPoint> collect_final_frontier() const override {
+        return snapshot_frontier_points(target_node);
+    }
 };
 
 std::shared_ptr<AbstractSolver> get_SOPMOA_relaxed_solver(

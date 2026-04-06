@@ -10,6 +10,8 @@ template<int N> class AVL_Tree;
 template<int N>
 class Gcl_tree {
 public:
+    using Snapshot = std::vector<CostVec<N>>;
+
     Gcl_tree(size_t num_node) {
         for (int i = 0; i < num_node + 1; i++) {
             gcl.push_back(AVL_Tree<N>());
@@ -23,12 +25,14 @@ public:
         return this->node_check(gcl[node].root, cost);
     }
 
-    inline void frontier_update(size_t node, const CostVec<N> & cost) {
+    inline bool frontier_update(size_t node, const CostVec<N> & cost) {
         if (node >= gcl.size()) { 
             perror(("Invalid Gcl_tree index " + std::to_string(node)).c_str());
             exit(EXIT_FAILURE);
-            return; 
+            return false; 
         }
+
+        if (this->node_check(gcl[node].root, cost)) { return false; }
 
         std::vector<CostVec<N>> filtered_costs;
         this->node_filter(gcl[node].root, cost, filtered_costs);
@@ -36,6 +40,15 @@ public:
             gcl[node].erase(filtered_cost);
         }
         gcl[node].insert(cost);
+        return true;
+    }
+
+    inline Snapshot snapshot(size_t node) const {
+        Snapshot copy;
+        if (node >= gcl.size()) { return copy; }
+
+        this->node_snapshot(gcl[node].root, copy);
+        return copy;
     }
 
 private:
@@ -67,6 +80,13 @@ private:
             this->node_filter(n_ptr->left, cost, filtered_costs);
             this->node_filter(n_ptr->right, cost, filtered_costs);
         }
+    }
+
+    void node_snapshot(AVL_Node<N>* n_ptr, Snapshot& copy) const {
+        if (n_ptr == nullptr) { return; }
+        node_snapshot(n_ptr->left, copy);
+        copy.push_back(n_ptr->key);
+        node_snapshot(n_ptr->right, copy);
     }
 };
 

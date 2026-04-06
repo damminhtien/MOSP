@@ -1,6 +1,8 @@
 #ifndef UTILS_BENCHMARK_METRICS
 #define UTILS_BENCHMARK_METRICS
 
+#include <atomic>
+
 #include "../common_inc.h"
 #include "cost.h"
 
@@ -104,6 +106,10 @@ public:
     void on_pruned_by_target();
     // Call when node-frontier dominance prunes a label.
     void on_pruned_by_node();
+    // Call when the target frontier is checked for dominance.
+    void on_frontier_check_target();
+    // Call when the node frontier is checked for dominance.
+    void on_frontier_check_node();
     // Call when a label is rejected for another reason.
     void on_pruned_other();
     // Call when an accepted target label is observed before frontier cleanup.
@@ -112,6 +118,7 @@ public:
     void observe_open_size(size_t open_size);
     // Record the latest live-label count for peak tracking.
     void observe_live_labels(size_t live_labels);
+    const CounterSet& counters() const { return counters_; }
 
 private:
     friend class BenchmarkRecorder;
@@ -127,6 +134,7 @@ public:
     ThreadLocalSink& main_thread_sink();
     void merge(const ThreadLocalSink& sink);
     double elapsed_sec() const;
+    void set_counters(const CounterSet& counters);
 
     // Record one target frontier check event.
     void on_frontier_check_target();
@@ -136,6 +144,7 @@ public:
     void on_frontier_update();
     // Export a new anytime point when the target frontier changes or interval sampling is due.
     void on_target_frontier_changed(const std::vector<FrontierPoint>& frontier, const char* trigger = "frontier_change");
+    void on_target_frontier_changed(const std::vector<FrontierPoint>& frontier, const CounterSet& counters, const char* trigger);
     void set_status(RunStatus status);
 
     bool has_status() const;
@@ -153,6 +162,7 @@ public:
     void write_trace_csv(const std::filesystem::path& csv_path) const;
 
 private:
+    void annotate_anytime_quality_metrics();
     CounterSet current_counters_snapshot() const;
     bool should_record_trace(const std::vector<FrontierPoint>& frontier, double elapsed_sec) const;
     void write_summary_header(std::ofstream& output) const;
@@ -161,9 +171,10 @@ private:
     ThreadLocalSink main_thread_sink_;
     BenchmarkClock::time_point start_time_{};
     std::vector<FrontierPoint> last_frontier_snapshot_;
+    std::vector<std::vector<FrontierPoint>> trace_frontier_snapshots_;
     uint64_t trace_interval_ms_ = 0;
     double last_trace_time_sec_ = -1.0;
-    uint64_t frontier_updates_ = 0;
+    std::atomic<uint64_t> frontier_updates_{0};
     bool configured_ = false;
     bool finalized_ = false;
     bool status_set_ = false;

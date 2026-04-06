@@ -22,11 +22,17 @@ public:
     ~EMOA() { for (auto ptr : all_labels){ delete ptr; } }
 
     virtual std::string get_name() override {return "EMOA(" + std::to_string(N)+"obj)-" + gcl_ptr->get_name(); }
+    bool supports_canonical_benchmark_output() const override { return true; }
     void solve(double time_limit = std::numeric_limits<double>::infinity()) override;
     
 private:
     std::list<Label<N>*> all_labels;
     std::unique_ptr<Gcl_tree<N-1>> gcl_ptr;
+    std::vector<FrontierPoint> target_frontier_;
+
+    std::vector<FrontierPoint> collect_final_frontier() const override {
+        return sort_frontier_lexicographically(target_frontier_);
+    }
 };
 
 std::shared_ptr<AbstractSolver> get_EMOA_solver(

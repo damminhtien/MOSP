@@ -23,6 +23,127 @@ bool lexicographically_smaller_vector(const std::vector<cost_t>& lhs, const std:
     return lhs.size() < rhs.size();
 }
 
+size_t frontier_match_count(const std::vector<FrontierPoint>& lhs, const std::vector<FrontierPoint>& rhs) {
+    size_t lhs_idx = 0;
+    size_t rhs_idx = 0;
+    size_t matches = 0;
+
+    while (lhs_idx < lhs.size() && rhs_idx < rhs.size()) {
+        if (lhs[lhs_idx].cost == rhs[rhs_idx].cost) {
+            matches++;
+            lhs_idx++;
+            rhs_idx++;
+            continue;
+        }
+
+        if (lexicographically_smaller_vector(lhs[lhs_idx].cost, rhs[rhs_idx].cost)) {
+            lhs_idx++;
+        } else {
+            rhs_idx++;
+        }
+    }
+
+    return matches;
+}
+
+std::vector<double> collect_reference_point(
+    const std::vector<FrontierPoint>& final_frontier,
+    const std::vector<std::vector<FrontierPoint>>& snapshots,
+    size_t num_objectives
+) {
+    std::vector<double> reference(num_objectives, 1.0);
+    bool has_any_point = false;
+
+    auto observe_frontier = [&](const std::vector<FrontierPoint>& frontier) {
+        for (const FrontierPoint& point : frontier) {
+            const size_t limit = std::min(num_objectives, point.cost.size());
+            for (size_t idx = 0; idx < limit; idx++) {
+                reference[idx] = std::max(reference[idx], static_cast<double>(point.cost[idx]) + 1.0);
+            }
+            has_any_point = true;
+        }
+    };
+
+    observe_frontier(final_frontier);
+    for (const auto& snapshot : snapshots) {
+        observe_frontier(snapshot);
+    }
+
+    if (!has_any_point) {
+        reference.clear();
+    }
+    return reference;
+}
+
+std::vector<std::vector<double>> frontier_to_double_points(const std::vector<FrontierPoint>& frontier, size_t num_objectives) {
+    std::vector<std::vector<double>> points;
+    points.reserve(frontier.size());
+
+    for (const FrontierPoint& point : frontier) {
+        std::vector<double> coords(num_objectives, 0.0);
+        const size_t limit = std::min(num_objectives, point.cost.size());
+        for (size_t idx = 0; idx < limit; idx++) {
+            coords[idx] = static_cast<double>(point.cost[idx]);
+        }
+        points.push_back(std::move(coords));
+    }
+
+    return points;
+}
+
+double hypervolume_recursive(std::vector<std::vector<double>> points, const std::vector<double>& reference, size_t dimension) {
+    if (points.empty() || dimension == 0) { return 0.0; }
+    if (dimension == 1) {
+        double minimum = reference[0];
+        for (const auto& point : points) {
+            minimum = std::min(minimum, point[0]);
+        }
+        return std::max(0.0, reference[0] - minimum);
+    }
+
+    const size_t axis = dimension - 1;
+    std::sort(
+        points.begin(),
+        points.end(),
+        [axis](const std::vector<double>& lhs, const std::vector<double>& rhs) {
+            if (lhs[axis] != rhs[axis]) {
+                return lhs[axis] < rhs[axis];
+            }
+            return lhs < rhs;
+        }
+    );
+
+    double volume = 0.0;
+    double previous = reference[axis];
+    while (!points.empty()) {
+        const double bound = points.back()[axis];
+        if (bound < previous) {
+            std::vector<std::vector<double>> projected;
+            projected.reserve(points.size());
+            for (const auto& point : points) {
+                projected.emplace_back(point.begin(), point.begin() + static_cast<long>(axis));
+            }
+
+            std::vector<double> projected_reference(reference.begin(), reference.begin() + static_cast<long>(axis));
+            volume += hypervolume_recursive(std::move(projected), projected_reference, axis) * (previous - bound);
+            previous = bound;
+        }
+
+        do {
+            points.pop_back();
+        } while (!points.empty() && points.back()[axis] == previous);
+    }
+
+    return volume;
+}
+
+double frontier_hypervolume(const std::vector<FrontierPoint>& frontier, const std::vector<double>& reference, size_t num_objectives) {
+    if (frontier.empty() || reference.size() != num_objectives || num_objectives == 0) {
+        return 0.0;
+    }
+    return hypervolume_recursive(frontier_to_double_points(frontier, num_objectives), reference, num_objectives);
+}
+
 void ensure_parent_directory(const std::filesystem::path& file_path) {
     if (file_path.empty()) { return; }
 
@@ -106,6 +227,14 @@ void ThreadLocalSink::on_pruned_by_node() {
     counters_.pruned_by_node++;
 }
 
+void ThreadLocalSink::on_frontier_check_target() {
+    counters_.target_frontier_checks++;
+}
+
+void ThreadLocalSink::on_frontier_check_node() {
+    counters_.node_frontier_checks++;
+}
+
 void ThreadLocalSink::on_pruned_other() {
     counters_.pruned_other++;
 }
@@ -141,9 +270,10 @@ void BenchmarkRecorder::configure(const RunMetrics& template_metadata, uint64_t 
     main_thread_sink_ = ThreadLocalSink();
     start_time_ = BenchmarkClock::now();
     last_frontier_snapshot_.clear();
+    trace_frontier_snapshots_.clear();
     trace_interval_ms_ = trace_interval_ms;
     last_trace_time_sec_ = -1.0;
-    frontier_updates_ = 0;
+    frontier_updates_.store(0, std::memory_order_relaxed);
     configured_ = true;
     finalized_ = false;
     status_set_ = false;
@@ -166,6 +296,8 @@ void BenchmarkRecorder::merge(const ThreadLocalSink& sink) {
     metrics_.counters.target_hits_raw += sink.counters_.target_hits_raw;
     metrics_.counters.peak_open_size = std::max(metrics_.counters.peak_open_size, sink.counters_.peak_open_size);
     metrics_.counters.peak_live_labels = std::max(metrics_.counters.peak_live_labels, sink.counters_.peak_live_labels);
+    metrics_.counters.target_frontier_checks += sink.counters_.target_frontier_checks;
+    metrics_.counters.node_frontier_checks += sink.counters_.node_frontier_checks;
 }
 
 double BenchmarkRecorder::elapsed_sec() const {
@@ -173,6 +305,10 @@ double BenchmarkRecorder::elapsed_sec() const {
         return 0.0;
     }
     return BenchmarkClock::seconds_since(start_time_);
+}
+
+void BenchmarkRecorder::set_counters(const CounterSet& counters) {
+    metrics_.counters = counters;
 }
 
 void BenchmarkRecorder::on_frontier_check_target() {
@@ -184,7 +320,7 @@ void BenchmarkRecorder::on_frontier_check_node() {
 }
 
 void BenchmarkRecorder::on_frontier_update() {
-    frontier_updates_++;
+    frontier_updates_.fetch_add(1, std::memory_order_relaxed);
 }
 
 CounterSet BenchmarkRecorder::current_counters_snapshot() const {
@@ -197,6 +333,8 @@ CounterSet BenchmarkRecorder::current_counters_snapshot() const {
     snapshot.target_hits_raw += main_thread_sink_.counters_.target_hits_raw;
     snapshot.peak_open_size = std::max(snapshot.peak_open_size, main_thread_sink_.counters_.peak_open_size);
     snapshot.peak_live_labels = std::max(snapshot.peak_live_labels, main_thread_sink_.counters_.peak_live_labels);
+    snapshot.target_frontier_checks += main_thread_sink_.counters_.target_frontier_checks;
+    snapshot.node_frontier_checks += main_thread_sink_.counters_.node_frontier_checks;
     return snapshot;
 }
 
@@ -252,6 +390,44 @@ void BenchmarkRecorder::on_target_frontier_changed(const std::vector<FrontierPoi
 
     metrics_.anytime_trace.push_back(point);
     last_frontier_snapshot_ = normalized;
+    trace_frontier_snapshots_.push_back(normalized);
+    last_trace_time_sec_ = elapsed_sec;
+}
+
+void BenchmarkRecorder::on_target_frontier_changed(const std::vector<FrontierPoint>& frontier, const CounterSet& counters, const char* trigger) {
+    if (!configured_) { return; }
+
+    const double elapsed_sec = BenchmarkClock::seconds_since(start_time_);
+    const std::vector<FrontierPoint> normalized = sort_frontier_lexicographically(frontier);
+
+    if (normalized.empty()) {
+        last_frontier_snapshot_.clear();
+        return;
+    }
+
+    if (!should_record_trace(normalized, elapsed_sec)) {
+        last_frontier_snapshot_ = normalized;
+        return;
+    }
+
+    if (metrics_.time_to_first_solution_sec < 0.0) {
+        metrics_.time_to_first_solution_sec = elapsed_sec;
+    }
+
+    AnytimePoint point;
+    point.time_sec = elapsed_sec;
+    point.frontier_size = normalized.size();
+    point.generated_labels = counters.generated_labels;
+    point.expanded_labels = counters.expanded_labels;
+    point.pruned_by_target = counters.pruned_by_target;
+    point.pruned_by_node = counters.pruned_by_node;
+    point.pruned_other = counters.pruned_other;
+    point.target_hits_raw = counters.target_hits_raw;
+    point.trigger = trigger == nullptr ? "frontier_change" : trigger;
+
+    metrics_.anytime_trace.push_back(point);
+    last_frontier_snapshot_ = normalized;
+    trace_frontier_snapshots_.push_back(normalized);
     last_trace_time_sec_ = elapsed_sec;
 }
 
@@ -281,6 +457,36 @@ void BenchmarkRecorder::set_trace_artifact_path(const std::filesystem::path& csv
     metrics_.trace_artifact_path = csv_path.string();
 }
 
+void BenchmarkRecorder::annotate_anytime_quality_metrics() {
+    if (metrics_.anytime_trace.empty()) {
+        return;
+    }
+
+    if (metrics_.final_frontier.empty()) {
+        for (AnytimePoint& point : metrics_.anytime_trace) {
+            point.recall = 1.0;
+            point.hv_ratio = std::numeric_limits<double>::quiet_NaN();
+        }
+        return;
+    }
+
+    const std::vector<double> reference = collect_reference_point(
+        metrics_.final_frontier,
+        trace_frontier_snapshots_,
+        metrics_.num_objectives
+    );
+    const double final_hv = frontier_hypervolume(metrics_.final_frontier, reference, metrics_.num_objectives);
+
+    for (size_t idx = 0; idx < metrics_.anytime_trace.size(); idx++) {
+        const std::vector<FrontierPoint>& snapshot = trace_frontier_snapshots_[idx];
+        metrics_.anytime_trace[idx].recall = static_cast<double>(frontier_match_count(snapshot, metrics_.final_frontier))
+            / static_cast<double>(metrics_.final_frontier.size());
+        metrics_.anytime_trace[idx].hv_ratio = final_hv > 0.0
+            ? frontier_hypervolume(snapshot, reference, metrics_.num_objectives) / final_hv
+            : std::numeric_limits<double>::quiet_NaN();
+    }
+}
+
 RunMetrics BenchmarkRecorder::finalize(const std::vector<FrontierPoint>& final_frontier) {
     if (!configured_) {
         return metrics_;
@@ -291,6 +497,7 @@ RunMetrics BenchmarkRecorder::finalize(const std::vector<FrontierPoint>& final_f
         metrics_.runtime_sec = BenchmarkClock::seconds_since(start_time_);
         metrics_.final_frontier = sort_frontier_lexicographically(normalize_frontier(final_frontier));
         metrics_.counters.final_frontier_size = metrics_.final_frontier.size();
+        annotate_anytime_quality_metrics();
         finalized_ = true;
     }
 

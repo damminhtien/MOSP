@@ -30,8 +30,24 @@ template<int N>
 void SOPMOA_relaxed<N>::solve(double time_limit) {
     std::cout << "start SOPMOA_relaxed " + std::to_string(num_threads) + " threads\n";
 
+    num_generation = 0;
+    num_expansion = 0;
     inflight_labels.store(0, std::memory_order_relaxed);
+    queued_labels.store(0, std::memory_order_relaxed);
+    allocated_labels.store(0, std::memory_order_relaxed);
     stop_requested.store(false, std::memory_order_relaxed);
+    timed_out.store(false, std::memory_order_relaxed);
+    generated_labels_total_.store(0, std::memory_order_relaxed);
+    expanded_labels_total_.store(0, std::memory_order_relaxed);
+    pruned_by_target_total_.store(0, std::memory_order_relaxed);
+    pruned_by_node_total_.store(0, std::memory_order_relaxed);
+    pruned_other_total_.store(0, std::memory_order_relaxed);
+    target_hits_raw_total_.store(0, std::memory_order_relaxed);
+    target_frontier_checks_total_.store(0, std::memory_order_relaxed);
+    node_frontier_checks_total_.store(0, std::memory_order_relaxed);
+    peak_open_size_.store(0, std::memory_order_relaxed);
+    peak_live_labels_.store(0, std::memory_order_relaxed);
+    next_trace_sample_ms_.store(benchmark_trace_interval_ms(), std::memory_order_relaxed);
     total_steals = 0;
     total_inbox_batch_flushes = 0;
     total_inbox_labels_flushed = 0;
@@ -42,6 +58,7 @@ void SOPMOA_relaxed<N>::solve(double time_limit) {
 
     for (auto & worker : workers) {
         worker->heap.clear();
+        worker->metrics_sink = ThreadLocalSink();
         worker->local_generated = 0;
         worker->local_expanded = 0;
         worker->local_steals = 0;
@@ -65,6 +82,9 @@ void SOPMOA_relaxed<N>::solve(double time_limit) {
     start_g.fill(0);
     auto & start_h = heuristic(start_node);
     Label<N>* start_label = workers[start_owner]->arena.create(start_node, start_g, start_h);
+    allocated_labels.store(1, std::memory_order_release);
+    peak_live_labels_.store(1, std::memory_order_relaxed);
+    workers[start_owner]->metrics_sink.observe_live_labels(1);
     inflight_labels.store(1, std::memory_order_release);
     enqueue_label(start_owner, start_owner, start_label);
 
@@ -81,8 +101,6 @@ void SOPMOA_relaxed<N>::solve(double time_limit) {
     }
 
     for (auto & worker : workers) {
-        num_generation += worker->local_generated;
-        num_expansion += worker->local_expanded;
         total_steals += worker->local_steals;
         total_inbox_batch_flushes += worker->local_inbox_batch_flushes;
         total_inbox_labels_flushed += worker->local_inbox_labels_flushed;
@@ -91,7 +109,16 @@ void SOPMOA_relaxed<N>::solve(double time_limit) {
         total_frontier_check_ns += worker->frontier_check_ns;
     }
 
+    num_generation = generated_labels_total_.load(std::memory_order_relaxed);
+    num_expansion = expanded_labels_total_.load(std::memory_order_relaxed);
+
     collect_final_solutions();
+    if (benchmark_enabled()) {
+        benchmark_recorder().set_counters(counter_snapshot());
+        set_benchmark_status(
+            timed_out.load(std::memory_order_acquire) ? RunStatus::timeout : RunStatus::completed
+        );
+    }
 
     auto frontier_sizes = gcl_ptr->live_frontier_sizes();
     size_t median_frontier_size = 0;
@@ -124,9 +151,12 @@ void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, double time_limit) {
             std::chrono::steady_clock::now() - search_start
         ).count();
         if (elapsed > time_limit) {
+            timed_out.store(true, std::memory_order_release);
             stop_requested.store(true, std::memory_order_release);
             break;
         }
+
+        maybe_record_interval_sample(elapsed);
 
         drain_inbox(worker_id);
 
@@ -142,6 +172,11 @@ void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, double time_limit) {
                 worker.heap.pop_back();
             }
         }
+        if (!batch.empty()) {
+            const size_t open_size = queued_labels.fetch_sub(batch.size(), std::memory_order_acq_rel) - batch.size();
+            observe_peak(peak_open_size_, open_size);
+            workers[worker_id]->metrics_sink.observe_open_size(open_size);
+        }
 
         if (batch.empty()) {
             flush_all_outboxes(worker_id);
@@ -155,6 +190,11 @@ void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, double time_limit) {
                     batch.push_back(worker.heap.back());
                     worker.heap.pop_back();
                 }
+            }
+            if (!batch.empty()) {
+                const size_t open_size = queued_labels.fetch_sub(batch.size(), std::memory_order_acq_rel) - batch.size();
+                observe_peak(peak_open_size_, open_size);
+                workers[worker_id]->metrics_sink.observe_open_size(open_size);
             }
         }
 
@@ -188,12 +228,11 @@ void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, double time_limit) {
 
 template<int N>
 void SOPMOA_relaxed<N>::process_label(size_t worker_id, Label<N>* curr, double time_limit) {
-    workers[worker_id]->local_generated++;
-
     const double elapsed = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - search_start
     ).count();
     if (elapsed > time_limit) {
+        timed_out.store(true, std::memory_order_release);
         stop_requested.store(true, std::memory_order_release);
         return;
     }
@@ -207,16 +246,31 @@ void SOPMOA_relaxed<N>::process_label(size_t worker_id, Label<N>* curr, double t
         return;
     }
     if (!frontier_update(curr->node, curr->f, curr->node == target_node ? elapsed : -1.0)) {
+        pruned_other_total_.fetch_add(1, std::memory_order_relaxed);
         inflight_labels.fetch_sub(1, std::memory_order_acq_rel);
         return;
     }
-
-    workers[worker_id]->local_expanded++;
 
     if (curr->node == target_node) {
+        target_hits_raw_total_.fetch_add(1, std::memory_order_relaxed);
+        if (benchmark_enabled()) {
+            std::lock_guard<std::mutex> guard(benchmark_trace_lock);
+            benchmark_recorder().on_target_frontier_changed(
+                snapshot_frontier_points(target_node),
+                counter_snapshot(),
+                "target_accept"
+            );
+        }
         inflight_labels.fetch_sub(1, std::memory_order_acq_rel);
         return;
     }
+
+    expanded_labels_total_.fetch_add(1, std::memory_order_relaxed);
+    workers[worker_id]->local_expanded++;
+    workers[worker_id]->metrics_sink.on_label_expanded(
+        queued_labels.load(std::memory_order_relaxed),
+        allocated_labels.load(std::memory_order_relaxed)
+    );
 
     const CostVec<N>& curr_h = heuristic(curr->node);
     const std::vector<Edge> &outgoing_edges = graph[curr->node];
@@ -234,6 +288,9 @@ void SOPMOA_relaxed<N>::process_label(size_t worker_id, Label<N>* curr, double t
 
         Label<N>* succ = workers[worker_id]->arena.create(succ_node, succ_f);
         succ->should_check_sol = should_check_sol;
+        const size_t live_labels = allocated_labels.fetch_add(1, std::memory_order_acq_rel) + 1;
+        observe_peak(peak_live_labels_, live_labels);
+        workers[worker_id]->metrics_sink.observe_live_labels(live_labels);
 
         inflight_labels.fetch_add(1, std::memory_order_acq_rel);
         enqueue_label(worker_id, owner_of(succ_node), succ);
@@ -244,6 +301,15 @@ void SOPMOA_relaxed<N>::process_label(size_t worker_id, Label<N>* curr, double t
 
 template<int N>
 void SOPMOA_relaxed<N>::enqueue_label(size_t worker_id, size_t owner_id, Label<N>* label) {
+    workers[worker_id]->local_generated++;
+    generated_labels_total_.fetch_add(1, std::memory_order_relaxed);
+    const size_t open_size = queued_labels.fetch_add(1, std::memory_order_acq_rel) + 1;
+    observe_peak(peak_open_size_, open_size);
+    workers[worker_id]->metrics_sink.on_label_generated(
+        open_size,
+        allocated_labels.load(std::memory_order_relaxed)
+    );
+
     auto & owner = *workers[owner_id];
     if (owner_id == worker_id) {
         std::lock_guard<std::mutex> guard(owner.heap_lock);
@@ -339,6 +405,9 @@ bool SOPMOA_relaxed<N>::steal_label(size_t worker_id, std::minstd_rand& rng, Lab
     std::pop_heap(victim.heap.begin(), victim.heap.end(), typename Label<N>::lex_larger_for_PQ());
     label = victim.heap.back();
     victim.heap.pop_back();
+    const size_t open_size = queued_labels.fetch_sub(1, std::memory_order_acq_rel) - 1;
+    observe_peak(peak_open_size_, open_size);
+    workers[worker_id]->metrics_sink.observe_open_size(open_size);
     workers[worker_id]->local_steals++;
     return true;
 }
@@ -346,20 +415,30 @@ bool SOPMOA_relaxed<N>::steal_label(size_t worker_id, std::minstd_rand& rng, Lab
 template<int N>
 bool SOPMOA_relaxed<N>::target_dominated(size_t worker_id, const CostVec<N>& cost) {
     auto start_check = std::chrono::steady_clock::now();
+    target_frontier_checks_total_.fetch_add(1, std::memory_order_relaxed);
     workers[worker_id]->local_target_checks++;
     bool dominated = gcl_ptr->frontier_check(target_node, cost);
     auto end_check = std::chrono::steady_clock::now();
     workers[worker_id]->frontier_check_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(end_check - start_check).count();
+    if (dominated) {
+        pruned_by_target_total_.fetch_add(1, std::memory_order_relaxed);
+        workers[worker_id]->metrics_sink.on_pruned_by_target();
+    }
     return dominated;
 }
 
 template<int N>
 bool SOPMOA_relaxed<N>::node_dominated(size_t worker_id, size_t node, const CostVec<N>& cost) {
     auto start_check = std::chrono::steady_clock::now();
+    node_frontier_checks_total_.fetch_add(1, std::memory_order_relaxed);
     workers[worker_id]->local_node_checks++;
     bool dominated = gcl_ptr->frontier_check(node, cost);
     auto end_check = std::chrono::steady_clock::now();
     workers[worker_id]->frontier_check_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(end_check - start_check).count();
+    if (dominated) {
+        pruned_by_node_total_.fetch_add(1, std::memory_order_relaxed);
+        workers[worker_id]->metrics_sink.on_pruned_by_node();
+    }
     return dominated;
 }
 
@@ -370,16 +449,67 @@ bool SOPMOA_relaxed<N>::frontier_update(size_t node, const CostVec<N>& cost, dou
 
 template<int N>
 void SOPMOA_relaxed<N>::collect_final_solutions() {
-    auto snapshot = gcl_ptr->snapshot(target_node);
-    solutions.clear();
-    solutions.reserve(snapshot->size());
+    rebuild_solutions_from_frontier(snapshot_frontier_points(target_node));
+}
+
+template<int N>
+std::vector<FrontierPoint> SOPMOA_relaxed<N>::snapshot_frontier_points(size_t node) const {
+    auto snapshot = gcl_ptr->snapshot(node);
+    std::vector<FrontierPoint> frontier;
+    frontier.reserve(snapshot->size());
 
     for (const auto & entry : *snapshot) {
-        solutions.emplace_back(
+        frontier.push_back({
             std::vector<cost_t>(entry.cost.begin(), entry.cost.end()),
             entry.time_found
-        );
+        });
     }
+
+    return sort_frontier_lexicographically(normalize_frontier(frontier));
+}
+
+template<int N>
+void SOPMOA_relaxed<N>::observe_peak(std::atomic<uint64_t>& peak, uint64_t value) {
+    uint64_t current = peak.load(std::memory_order_relaxed);
+    while (current < value && !peak.compare_exchange_weak(current, value, std::memory_order_relaxed)) {}
+}
+
+template<int N>
+CounterSet SOPMOA_relaxed<N>::counter_snapshot() const {
+    CounterSet counters;
+    counters.generated_labels = generated_labels_total_.load(std::memory_order_relaxed);
+    counters.expanded_labels = expanded_labels_total_.load(std::memory_order_relaxed);
+    counters.pruned_by_target = pruned_by_target_total_.load(std::memory_order_relaxed);
+    counters.pruned_by_node = pruned_by_node_total_.load(std::memory_order_relaxed);
+    counters.pruned_other = pruned_other_total_.load(std::memory_order_relaxed);
+    counters.target_hits_raw = target_hits_raw_total_.load(std::memory_order_relaxed);
+    counters.peak_open_size = peak_open_size_.load(std::memory_order_relaxed);
+    counters.peak_live_labels = peak_live_labels_.load(std::memory_order_relaxed);
+    counters.target_frontier_checks = target_frontier_checks_total_.load(std::memory_order_relaxed);
+    counters.node_frontier_checks = node_frontier_checks_total_.load(std::memory_order_relaxed);
+    return counters;
+}
+
+template<int N>
+void SOPMOA_relaxed<N>::maybe_record_interval_sample(double elapsed_sec) {
+    if (!benchmark_enabled()) { return; }
+
+    const uint64_t interval_ms = benchmark_trace_interval_ms();
+    if (interval_ms == 0) { return; }
+
+    const uint64_t elapsed_ms = static_cast<uint64_t>(elapsed_sec * 1000.0);
+    uint64_t next_due = next_trace_sample_ms_.load(std::memory_order_relaxed);
+    if (elapsed_ms < next_due || next_due == 0) { return; }
+
+    std::lock_guard<std::mutex> guard(benchmark_trace_lock);
+    next_due = next_trace_sample_ms_.load(std::memory_order_relaxed);
+    if (elapsed_ms < next_due || next_due == 0) { return; }
+
+    const std::vector<FrontierPoint> snapshot = snapshot_frontier_points(target_node);
+    if (snapshot.empty()) { return; }
+
+    next_trace_sample_ms_.store(next_due + interval_ms, std::memory_order_relaxed);
+    benchmark_recorder().on_target_frontier_changed(snapshot, counter_snapshot(), "interval_sample");
 }
 
 template<int N>

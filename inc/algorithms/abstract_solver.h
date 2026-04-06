@@ -100,6 +100,7 @@ public:
             return RunMetrics();
         }
 
+        sync_benchmark_recorder();
         RunMetrics metrics = benchmark_recorder_.finalize(collect_final_frontier());
         num_generation = metrics.counters.generated_labels;
         num_expansion = metrics.counters.expanded_labels;
@@ -131,6 +132,25 @@ public:
     }
 
 protected:
+    virtual void sync_benchmark_recorder() {}
+
+    double benchmark_elapsed_sec(const BenchmarkClock::time_point& local_start) const {
+        if (benchmark_enabled()) {
+            return benchmark_recorder_.elapsed_sec();
+        }
+        return BenchmarkClock::seconds_since(local_start);
+    }
+
+    void rebuild_solutions_from_frontier(const std::vector<FrontierPoint>& frontier) {
+        const std::vector<FrontierPoint> sorted_frontier = sort_frontier_lexicographically(normalize_frontier(frontier));
+        solutions.clear();
+        solutions.reserve(sorted_frontier.size());
+
+        for (const FrontierPoint& point : sorted_frontier) {
+            solutions.emplace_back(point.cost, point.time_found_sec);
+        }
+    }
+
     virtual std::vector<FrontierPoint> collect_final_frontier() const {
         std::vector<FrontierPoint> frontier;
         frontier.reserve(solutions.size());
