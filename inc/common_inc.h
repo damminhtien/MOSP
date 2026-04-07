@@ -8,6 +8,7 @@
 #include<string>
 #include<chrono>
 #include<ctime>
+#include<thread>
 #include<climits>
 #include<cstddef>
 #include<cstdint>

@@ -140,8 +140,9 @@ void single_run(
 
     if (use_canonical_output && !solver_supports_canonical_output(*solver)) {
         std::cerr
-            << "Canonical benchmark output is currently implemented only for LTMOA in Phase 2. "
-            << "Use --output for legacy CSV with solver " << solver->get_name() << "."
+            << "Canonical benchmark output is not available for solver "
+            << solver->get_name()
+            << ". Use --output for legacy CSV instead."
             << std::endl;
         exit(EXIT_FAILURE);
     }

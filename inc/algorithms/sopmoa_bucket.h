@@ -1,7 +1,6 @@
 #ifndef ALGORITHM_SOPMOA_BUCKET
 #define ALGORITHM_SOPMOA_BUCKET
 
-#include <omp.h>
 #include <tbb/concurrent_priority_queue.h>
 #include <tbb/concurrent_vector.h>
 

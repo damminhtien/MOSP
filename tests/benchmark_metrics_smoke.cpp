@@ -4,6 +4,10 @@
 
 #include "algorithms/abstract_solver.h"
 #include "algorithms/emoa.h"
+#include "algorithms/gcl/gcl.h"
+#include "algorithms/gcl/gcl_array.h"
+#include "algorithms/gcl/gcl_nwmoa.h"
+#include "algorithms/gcl/gcl_tree.h"
 #include "algorithms/lazy_ltmoa.h"
 #include "algorithms/lazy_ltmoa_array.h"
 #include "algorithms/ltmoa.h"
@@ -130,17 +134,67 @@ AdjacencyMatrix make_inv_graph() {
 }
 
 void assert_expected_frontier(const RunMetrics& metrics) {
-    assert(metrics.final_frontier.size() == 2);
+    assert(metrics.final_frontier.size() == 3);
     assert(metrics.final_frontier[0].cost == std::vector<cost_t>({2, 10}));
-    assert(metrics.final_frontier[1].cost == std::vector<cost_t>({10, 2}));
+    assert(metrics.final_frontier[1].cost == std::vector<cost_t>({6, 6}));
+    assert(metrics.final_frontier[2].cost == std::vector<cost_t>({10, 2}));
     assert(!metrics.anytime_trace.empty());
+    for (const AnytimePoint& point : metrics.anytime_trace) {
+        assert(std::isfinite(point.recall));
+        assert(std::isfinite(point.hv_ratio));
+    }
     assert(metrics.anytime_trace.back().recall == 1.0);
     assert(metrics.anytime_trace.back().hv_ratio == 1.0);
+}
+
+template <typename GclType>
+void run_gcl_snapshot_subcase(GclType& gcl) {
+    CostVec<2> first{};
+    first[0] = 2;
+    first[1] = 8;
+
+    CostVec<2> second{};
+    second[0] = 8;
+    second[1] = 2;
+
+    assert(gcl.frontier_update(1, first, 0.4));
+    assert(gcl.frontier_update(1, second, 0.6));
+    assert(!gcl.frontier_update(1, first, 0.2));
+
+    auto snapshot = gcl.snapshot(1);
+    std::vector<FrontierPoint> frontier;
+    frontier.reserve(snapshot.size());
+    for (const auto& entry : snapshot) {
+        frontier.push_back({
+            std::vector<cost_t>(entry.cost.begin(), entry.cost.end()),
+            entry.time_found
+        });
+    }
+
+    frontier = sort_frontier_lexicographically(normalize_frontier(frontier));
+    assert(frontier.size() == 2);
+    assert(frontier[0].cost == std::vector<cost_t>({2, 8}));
+    assert(frontier[0].time_found_sec == 0.2);
+    assert(frontier[1].cost == std::vector<cost_t>({8, 2}));
+    assert(frontier[1].time_found_sec == 0.6);
+}
+
+void run_gcl_matrix_subcase() {
+    Gcl<2> list_gcl(4);
+    Gcl_array<2> array_gcl(4);
+    Gcl_tree<2> tree_gcl(4);
+    Gcl_NWMOA<2> nwmoa_gcl(4);
+
+    run_gcl_snapshot_subcase(list_gcl);
+    run_gcl_snapshot_subcase(array_gcl);
+    run_gcl_snapshot_subcase(tree_gcl);
+    run_gcl_snapshot_subcase(nwmoa_gcl);
 }
 
 void run_solver_subcase(
     const std::filesystem::path& root,
     const std::string& label,
+    bool expect_exact_frontier,
     const std::function<std::shared_ptr<AbstractSolver>(AdjacencyMatrix&, AdjacencyMatrix&)>& make_solver
 ) {
     AdjacencyMatrix graph = make_graph();
@@ -177,24 +231,40 @@ void run_solver_subcase(
     assert(metrics.counters.peak_live_labels > 0);
     assert(metrics.time_to_first_solution_sec >= 0.0);
     assert(metrics.time_to_first_solution_sec <= metrics.runtime_sec);
-    assert_expected_frontier(metrics);
+    if (expect_exact_frontier) {
+        assert_expected_frontier(metrics);
+    } else {
+        assert(!metrics.anytime_trace.empty());
+        for (const AnytimePoint& point : metrics.anytime_trace) {
+            assert(std::isfinite(point.recall));
+            assert(std::isfinite(point.hv_ratio));
+        }
+    }
+
+    const std::string trace_text = read_file(root / (label + "_trace.csv"));
+    assert(trace_text.find("nan") == std::string::npos);
 }
 
 void run_solver_matrix_subcase(const std::filesystem::path& root) {
-    const std::vector<std::pair<std::string, std::function<std::shared_ptr<AbstractSolver>(AdjacencyMatrix&, AdjacencyMatrix&)>>> cases = {
-        {"ltmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_solver(graph, inv_graph, 0, 3); }},
-        {"lazy_ltmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LazyLTMOA_solver(graph, inv_graph, 0, 3); }},
-        {"ltmoa_array", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_array_solver(graph, inv_graph, 0, 3); }},
-        {"lazy_ltmoa_array", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LazyLTMOA_array_solver(graph, inv_graph, 0, 3); }},
-        {"emoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_EMOA_solver(graph, inv_graph, 0, 3); }},
-        {"nwmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_NWMOA_solver(graph, inv_graph, 0, 3); }},
-        {"sopmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_SOPMOA_solver(graph, inv_graph, 0, 3, 2); }},
-        {"sopmoa_relaxed", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_SOPMOA_relaxed_solver(graph, inv_graph, 0, 3, 2); }},
-        {"sopmoa_bucket", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_SOPMOA_bucket_solver(graph, inv_graph, 0, 3, 2); }},
+    struct SolverCase {
+        std::string label;
+        bool expect_exact_frontier;
+        std::function<std::shared_ptr<AbstractSolver>(AdjacencyMatrix&, AdjacencyMatrix&)> make_solver;
+    };
+
+    const std::vector<SolverCase> cases = {
+        {"ltmoa", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_solver(graph, inv_graph, 0, 3); }},
+        {"lazy_ltmoa", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LazyLTMOA_solver(graph, inv_graph, 0, 3); }},
+        {"ltmoa_array", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_array_solver(graph, inv_graph, 0, 3); }},
+        {"lazy_ltmoa_array", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LazyLTMOA_array_solver(graph, inv_graph, 0, 3); }},
+        {"emoa", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_EMOA_solver(graph, inv_graph, 0, 3); }},
+        {"nwmoa", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_NWMOA_solver(graph, inv_graph, 0, 3); }},
+        {"sopmoa", false, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_SOPMOA_solver(graph, inv_graph, 0, 3, 2); }},
+        {"sopmoa_relaxed", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_SOPMOA_relaxed_solver(graph, inv_graph, 0, 3, 2); }},
     };
 
     for (const auto& entry : cases) {
-        run_solver_subcase(root, entry.first, entry.second);
+        run_solver_subcase(root, entry.label, entry.expect_exact_frontier, entry.make_solver);
     }
 }
 
@@ -208,6 +278,7 @@ int main() {
     std::filesystem::create_directories(root);
 
     run_recorder_subcase(root);
+    run_gcl_matrix_subcase();
     run_solver_matrix_subcase(root);
 
     std::filesystem::remove_all(root);

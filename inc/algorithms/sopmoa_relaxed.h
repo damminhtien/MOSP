@@ -137,6 +137,7 @@ private:
     bool node_dominated(size_t worker_id, size_t node, const CostVec<N>& cost);
     bool frontier_update(size_t node, const CostVec<N>& cost, double time_found = -1.0);
     void collect_final_solutions();
+    double elapsed_sec() const;
     void observe_peak(std::atomic<uint64_t>& peak, uint64_t value);
     CounterSet counter_snapshot() const;
     void maybe_record_interval_sample(double elapsed_sec);

@@ -147,9 +147,7 @@ void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, double time_limit) {
             break;
         }
 
-        const double elapsed = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - search_start
-        ).count();
+        const double elapsed = elapsed_sec();
         if (elapsed > time_limit) {
             timed_out.store(true, std::memory_order_release);
             stop_requested.store(true, std::memory_order_release);
@@ -228,9 +226,7 @@ void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, double time_limit) {
 
 template<int N>
 void SOPMOA_relaxed<N>::process_label(size_t worker_id, Label<N>* curr, double time_limit) {
-    const double elapsed = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - search_start
-    ).count();
+    const double elapsed = elapsed_sec();
     if (elapsed > time_limit) {
         timed_out.store(true, std::memory_order_release);
         stop_requested.store(true, std::memory_order_release);
@@ -450,6 +446,11 @@ bool SOPMOA_relaxed<N>::frontier_update(size_t node, const CostVec<N>& cost, dou
 template<int N>
 void SOPMOA_relaxed<N>::collect_final_solutions() {
     rebuild_solutions_from_frontier(snapshot_frontier_points(target_node));
+}
+
+template<int N>
+double SOPMOA_relaxed<N>::elapsed_sec() const {
+    return benchmark_elapsed_sec(search_start);
 }
 
 template<int N>

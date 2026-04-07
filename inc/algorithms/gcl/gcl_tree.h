@@ -10,7 +10,12 @@ template<int N> class AVL_Tree;
 template<int N>
 class Gcl_tree {
 public:
-    using Snapshot = std::vector<CostVec<N>>;
+    struct FrontEntry {
+        CostVec<N> cost{};
+        double time_found = -1.0;
+    };
+
+    using Snapshot = std::vector<FrontEntry>;
 
     Gcl_tree(size_t num_node) {
         for (int i = 0; i < num_node + 1; i++) {
@@ -25,13 +30,19 @@ public:
         return this->node_check(gcl[node].root, cost);
     }
 
-    inline bool frontier_update(size_t node, const CostVec<N> & cost) {
+    inline bool frontier_update(size_t node, const CostVec<N> & cost, double time_found = -1.0) {
         if (node >= gcl.size()) { 
             perror(("Invalid Gcl_tree index " + std::to_string(node)).c_str());
             exit(EXIT_FAILURE);
             return false; 
         }
 
+        if (FrontEntry* existing = this->find_exact(gcl[node].root, cost)) {
+            if (existing->time_found < 0.0 || (time_found >= 0.0 && time_found < existing->time_found)) {
+                existing->time_found = time_found;
+            }
+            return false;
+        }
         if (this->node_check(gcl[node].root, cost)) { return false; }
 
         std::vector<CostVec<N>> filtered_costs;
@@ -39,7 +50,7 @@ public:
         for (auto & filtered_cost : filtered_costs) {
             gcl[node].erase(filtered_cost);
         }
-        gcl[node].insert(cost);
+        gcl[node].insert(FrontEntry{cost, time_found});
         return true;
     }
 
@@ -56,9 +67,9 @@ private:
 
     bool node_check(AVL_Node<N>* n_ptr, const CostVec<N>& cost) {
         if (n_ptr == nullptr) { return false; } 
-        if (weakly_dominate<N>(n_ptr->key, cost)) { return true; }
+        if (weakly_dominate<N>(n_ptr->entry.cost, cost)) { return true; }
 
-        if (lex_smaller<N>(cost, n_ptr->key)) {
+        if (lex_smaller<N>(cost, n_ptr->entry.cost)) {
             return this->node_check(n_ptr->left, cost);
         } else {
             if (this->node_check(n_ptr->left, cost)) {
@@ -71,34 +82,47 @@ private:
 
     void node_filter(AVL_Node<N>* n_ptr, const CostVec<N>& cost, std::vector<CostVec<N>> & filtered_costs) {
         if (n_ptr == nullptr) { return; }
-        if (lex_smaller<N>(n_ptr->key, cost)) {
+        if (lex_smaller<N>(n_ptr->entry.cost, cost)) {
             this->node_filter(n_ptr->right, cost, filtered_costs);
         } else {
-            if (weakly_dominate<N>(cost, n_ptr->key)) {
-                filtered_costs.push_back(n_ptr->key);
+            if (weakly_dominate<N>(cost, n_ptr->entry.cost)) {
+                filtered_costs.push_back(n_ptr->entry.cost);
             }
             this->node_filter(n_ptr->left, cost, filtered_costs);
             this->node_filter(n_ptr->right, cost, filtered_costs);
         }
     }
 
+    FrontEntry* find_exact(AVL_Node<N>* n_ptr, const CostVec<N>& cost) {
+        if (n_ptr == nullptr) { return nullptr; }
+        if (n_ptr->entry.cost == cost) { return &n_ptr->entry; }
+
+        if (lex_smaller<N>(cost, n_ptr->entry.cost)) {
+            return find_exact(n_ptr->left, cost);
+        }
+        if (lex_smaller<N>(n_ptr->entry.cost, cost)) {
+            return find_exact(n_ptr->right, cost);
+        }
+        return nullptr;
+    }
+
     void node_snapshot(AVL_Node<N>* n_ptr, Snapshot& copy) const {
         if (n_ptr == nullptr) { return; }
         node_snapshot(n_ptr->left, copy);
-        copy.push_back(n_ptr->key);
+        copy.push_back(n_ptr->entry);
         node_snapshot(n_ptr->right, copy);
     }
 };
 
 template<int N>
 struct AVL_Node {
-    CostVec<N> key;
+    typename Gcl_tree<N>::FrontEntry entry;
     AVL_Node<N>* left;
     AVL_Node<N>* right;
     int height;
 
-    AVL_Node(const CostVec<N>& k) 
-    : key(k), left(nullptr), right(nullptr), height(0) {}
+    explicit AVL_Node(const typename Gcl_tree<N>::FrontEntry& entry)
+    : entry(entry), left(nullptr), right(nullptr), height(0) {}
 
     void update_height() {
         int lh, rh;
@@ -138,33 +162,33 @@ public:
         return n_ptr->height;
     }
 
-    AVL_Node<N>* insert(CostVec<N> key) {
-        this->root = this->insert(key, this->root);
+    AVL_Node<N>* insert(const typename Gcl_tree<N>::FrontEntry& entry) {
+        this->root = this->insert(entry, this->root);
         return this->root;
     }
 
-    AVL_Node<N>* insert(CostVec<N> key, AVL_Node<N>* n_ptr) {
+    AVL_Node<N>* insert(const typename Gcl_tree<N>::FrontEntry& entry, AVL_Node<N>* n_ptr) {
         if (n_ptr == nullptr) {
             this->tree_size++;
-            n_ptr = new AVL_Node<N>(key);
-        } else if (lex_smaller<N>(key, n_ptr->key)) {
-            n_ptr->left = this->insert(key, n_ptr->left);
-        } else if (lex_smaller<N>(n_ptr->key, key)) {
-            n_ptr->right = this->insert(key, n_ptr->right);
+            n_ptr = new AVL_Node<N>(entry);
+        } else if (lex_smaller<N>(entry.cost, n_ptr->entry.cost)) {
+            n_ptr->left = this->insert(entry, n_ptr->left);
+        } else if (lex_smaller<N>(n_ptr->entry.cost, entry.cost)) {
+            n_ptr->right = this->insert(entry, n_ptr->right);
         }
         n_ptr->update_height();
 
         if (this->get_balance_factor(n_ptr) > 1) {
-            if (lex_smaller<N>(key, n_ptr->left->key)) {
+            if (lex_smaller<N>(entry.cost, n_ptr->left->entry.cost)) {
                 return this->right_rotate(n_ptr);
-            } else if (lex_smaller<N>(n_ptr->left->key, key)) {
+            } else if (lex_smaller<N>(n_ptr->left->entry.cost, entry.cost)) {
                 n_ptr->left = this->left_rotate(n_ptr->left);
                 return this->right_rotate(n_ptr);
             }
         } else if (this->get_balance_factor(n_ptr) < -1) {
-            if (lex_smaller<N>(n_ptr->right->key, key)) {
+            if (lex_smaller<N>(n_ptr->right->entry.cost, entry.cost)) {
                 return this->left_rotate(n_ptr);
-            } else if (lex_smaller<N>(key, n_ptr->right->key)) {
+            } else if (lex_smaller<N>(entry.cost, n_ptr->right->entry.cost)) {
                 n_ptr->right = this->right_rotate(n_ptr->right);
                 return this->left_rotate(n_ptr);
             }
@@ -180,9 +204,9 @@ public:
     AVL_Node<N> * erase(CostVec<N> key, AVL_Node<N>* n_ptr) {
         if (n_ptr == nullptr) {
             return nullptr; 
-        } else if (lex_smaller<N>(key, n_ptr->key)) {
+        } else if (lex_smaller<N>(key, n_ptr->entry.cost)) {
             n_ptr->left = this->erase(key, n_ptr->left);
-        } else if (lex_smaller<N>(n_ptr->key, key)) {
+        } else if (lex_smaller<N>(n_ptr->entry.cost, key)) {
             n_ptr->right = this->erase(key, n_ptr->right);
         } else {
             if (n_ptr->left == nullptr || n_ptr->right == nullptr) {
@@ -199,8 +223,8 @@ public:
                 delete temp;
             } else {
                 AVL_Node<N>* temp = this->find_min(n_ptr->right);
-                n_ptr->key = temp->key;
-                n_ptr->right = this->erase(temp->key, n_ptr->right);
+                n_ptr->entry = temp->entry;
+                n_ptr->right = this->erase(temp->entry.cost, n_ptr->right);
             }
         }
         if (n_ptr == nullptr) { return nullptr; }

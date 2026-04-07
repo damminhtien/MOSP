@@ -45,10 +45,10 @@ void NWMOA<N>::solve(double time_limit) {
 
     const auto local_start_time = BenchmarkClock::now();
     auto elapsed_seconds = [this, &local_start_time]() {
-        if (benchmark_enabled()) {
-            return benchmark_recorder().elapsed_sec();
-        }
-        return BenchmarkClock::seconds_since(local_start_time);
+        return benchmark_elapsed_sec(local_start_time);
+    };
+    auto snapshot_target_frontier = [this]() {
+        return sort_frontier_lexicographically(normalize_frontier(target_frontier_));
     };
     const double trace_interval_sec = static_cast<double>(benchmark_trace_interval_ms()) / 1000.0;
     double next_trace_sample_sec = trace_interval_sec > 0.0 ? trace_interval_sec : std::numeric_limits<double>::infinity();
@@ -57,7 +57,7 @@ void NWMOA<N>::solve(double time_limit) {
     while (!open.empty()) {
         const double elapsed_sec = elapsed_seconds();
         if (elapsed_sec > time_limit) {
-            rebuild_solutions_from_frontier(target_frontier_);
+            rebuild_solutions_from_frontier(snapshot_target_frontier());
             if (benchmark_enabled()) {
                 set_benchmark_status(RunStatus::timeout);
             }
@@ -65,7 +65,7 @@ void NWMOA<N>::solve(double time_limit) {
         }
 
         if (sink != nullptr && trace_interval_sec > 0.0 && !target_frontier_.empty() && elapsed_sec >= next_trace_sample_sec) {
-            benchmark_recorder().on_target_frontier_changed(target_frontier_, "interval_sample");
+            benchmark_recorder().on_target_frontier_changed(snapshot_target_frontier(), "interval_sample");
             next_trace_sample_sec += trace_interval_sec;
         }
 
@@ -94,8 +94,8 @@ void NWMOA<N>::solve(double time_limit) {
             }
             continue;
         }
-        if (benchmark_enabled()) {
-            benchmark_recorder().on_frontier_check_node();
+        if (sink != nullptr) {
+            sink->on_frontier_check_node();
         }
         if (gcl_ptr->frontier_check(curr->node, curr_f_tr)) {
             if (sink != nullptr) {
@@ -103,8 +103,8 @@ void NWMOA<N>::solve(double time_limit) {
             }
             continue;
         }
-        if (benchmark_enabled()) {
-            benchmark_recorder().on_frontier_check_target();
+        if (sink != nullptr) {
+            sink->on_frontier_check_target();
         }
         if (gcl_ptr->frontier_check(target_node, curr_f_tr)) {
             if (sink != nullptr) {
@@ -113,10 +113,7 @@ void NWMOA<N>::solve(double time_limit) {
             continue;
         }
 
-        if (benchmark_enabled()) {
-            benchmark_recorder().on_frontier_update();
-        }
-        gcl_ptr->frontier_update(curr->node, curr_f_tr);
+        gcl_ptr->frontier_update(curr->node, curr_f_tr, elapsed_sec);
         cost_last_truncated[curr->node] = curr_f_tr;
 
         if (curr->node == target_node) {
@@ -126,9 +123,10 @@ void NWMOA<N>::solve(double time_limit) {
                 sink->on_target_hit_raw();
             }
             if (insert_nondominated_frontier_point(target_frontier_, point)) {
-                rebuild_solutions_from_frontier(target_frontier_);
+                const std::vector<FrontierPoint> frontier_snapshot = snapshot_target_frontier();
+                rebuild_solutions_from_frontier(frontier_snapshot);
                 if (benchmark_enabled()) {
-                    benchmark_recorder().on_target_frontier_changed(target_frontier_, "target_accept");
+                    benchmark_recorder().on_target_frontier_changed(frontier_snapshot, "target_accept");
                 }
             }
             continue;
@@ -180,7 +178,7 @@ void NWMOA<N>::solve(double time_limit) {
         }
     }
 
-    rebuild_solutions_from_frontier(target_frontier_);
+    rebuild_solutions_from_frontier(snapshot_target_frontier());
     if (benchmark_enabled()) {
         set_benchmark_status(RunStatus::completed);
     }
