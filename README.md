@@ -284,44 +284,65 @@ Trace artifacts store:
 
 ## Benchmark Snapshot
 
-The table below is a historical local benchmark snapshot preserved from the
-commands in `run_command.txt`. It is useful as a regression reference, not as a
-publication claim.
+The table below is a fresh local rerun from the current instrumentation build.
+It uses one shared 3-objective NYC query and keeps `SOPMOA -n 4` in the same
+comparison set as the serial exact solvers.
 
 Setup:
 
-- date: April 4, 2026
+- date: April 7, 2026
 - maps: `maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt`
-- query: `88959 -> 96072`
-- requested budget: `2s`
-- machine: local macOS laptop run noted in the previous branch history
+- query: `175000 -> 189000`
+- benchmark budget: `2s`
+- artifact root: `output/readme-bench-20260407-233501`
+- export wall guard: `120s` per solver while generating README artifacts
 
-| Configuration | Threads | Runtime (s) | Generated | Expanded | Solutions | Interpretation |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `SOPMOA_relaxed` | 4 | `2.00048` median over 5 runs | about `699,497` avg | about `657,426` avg | about `1,395` avg | Best exact parallel result on this one query snapshot |
-| `LTMOA_array` | 1 | `3.51381` | `1,074,754` | `982,023` | `1,936` | Strongest serial baseline in the same historical notes |
-| `SOPMOA` | 4 | `2.00611` | `105,082` | `102,946` | `380` | Original shared-OPEN parallel solver |
-| `LTMOA` | 1 | `3.46159` | `317,047` | `303,935` | `932` | Reference exact baseline |
-| `LazyLTMOA` | 1 | `3.87518` | `455,678` | `304,071` | `932` | Lazy LTMOA variant |
-| `LazyLTMOA_array` | 1 | `4.14031` | `1,119,471` | `664,652` | `1,545` | Lazy array-backed variant |
-| `EMOA` | 1 | `4.14829` | `445,188` | `421,791` | `1,142` | AVL-tree-backed exact solver |
-| `NWMOA` | 1 | `4.14240` | `454,791` | `357,704` | `1,029` | Ordered-frontier exact solver |
+| Solver | Threads | Status | Runtime (s) | Generated | Expanded | Final frontier | First solution (s) | Full recall (s) |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `SOPMOA` | 4 | `timeout` | `2.00154` | `436,426` | `349,095` | `258` | `0.00712` | `1.94448` |
+| `SOPMOA_relaxed` | 4 | `timeout` | `2.00360` | `652,729` | `520,082` | `250` | `0.06858` | `1.86112` |
+| `LTMOA` | 1 | `timeout` | `2.00088` | `417,965` | `334,834` | `256` | `0.00032` | `1.92864` |
+| `LazyLTMOA` | 1 | `timeout` | `2.00080` | `966,783` | `318,028` | `251` | `0.00033` | `1.92840` |
+| `LTMOA_array` | 1 | `no row` | — | — | — | — | — | — |
+| `LazyLTMOA_array` | 1 | `timeout` | `2.00140` | `1,805,707` | `589,029` | `317` | `0.00178` | `1.97505` |
+| `EMOA` | 1 | `timeout` | `2.00116` | `523,113` | `418,435` | `276` | `0.00037` | `1.99198` |
+| `NWMOA` | 1 | `timeout` | `2.00314` | `641,734` | `309,833` | `250` | `0.00390` | `1.88331` |
+
+What this rerun shows:
+
+- `SOPMOA_relaxed -n 4` reaches full recall earliest in this run, but it does
+  so by expanding substantially more labels than `SOPMOA -n 4`.
+- `SOPMOA -n 4` stays cheaper in generated and expanded work than
+  `SOPMOA_relaxed -n 4` and still ends the budget with a slightly larger
+  frontier (`258` vs `250`).
+- Among the 1-thread exact solvers that emitted canonical rows, `NWMOA` reaches
+  full recall earliest, while `LazyLTMOA_array` finishes the budget with the
+  largest frontier and the highest label-generation cost.
+
+## Trace Artifacts
+
+The rerun emitted these canonical trace/frontier pairs:
+
+| Solver | Trace artifact | Frontier artifact |
+| --- | --- | --- |
+| `SOPMOA -n 4` | `output/readme-bench-20260407-233501/traces/SOPMOA_3obj_4threads_-custom_list__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/SOPMOA_3obj_4threads_-custom_list__nyc_3obj__q175000_189000.csv` |
+| `SOPMOA_relaxed -n 4` | `output/readme-bench-20260407-233501/traces/SOPMOA_relaxed_3obj_4threads_-optimistic_vector__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/SOPMOA_relaxed_3obj_4threads_-optimistic_vector__nyc_3obj__q175000_189000.csv` |
+| `LTMOA -n 1` | `output/readme-bench-20260407-233501/traces/LTMOA_3obj_-list__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/LTMOA_3obj_-list__nyc_3obj__q175000_189000.csv` |
+| `LazyLTMOA -n 1` | `output/readme-bench-20260407-233501/traces/LazyLTMOA_3obj_-list__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/LazyLTMOA_3obj_-list__nyc_3obj__q175000_189000.csv` |
+| `LazyLTMOA_array -n 1` | `output/readme-bench-20260407-233501/traces/LazyLTMOA_3obj_-array__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/LazyLTMOA_3obj_-array__nyc_3obj__q175000_189000.csv` |
+| `EMOA -n 1` | `output/readme-bench-20260407-233501/traces/EMOA_3obj_-avl_tree__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/EMOA_3obj_-avl_tree__nyc_3obj__q175000_189000.csv` |
+| `NWMOA -n 1` | `output/readme-bench-20260407-233501/traces/NWMOA_3obj_-custom_list2__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/NWMOA_3obj_-custom_list2__nyc_3obj__q175000_189000.csv` |
+| `LTMOA_array -n 1` | no trace emitted before the `120s` wall guard | no frontier emitted before the `120s` wall guard |
 
 Notes:
 
-- `SOPMOA_bucket` is intentionally omitted from the table because it aborted on
-  the same local benchmark query.
-- These numbers are machine-specific and should be treated as historical local
-  observations.
-- The table is deliberately MOSP-wide: it compares the solver families in the
-  repository instead of presenting the project as only a SOPMOA branch.
-
-Practical reading:
-
-- use `LTMOA_array` if you want the strongest historical 1-thread baseline
-- use `SOPMOA_relaxed -n 4` if you want the strongest historical exact parallel
-  result from the local branch notes
-- rerun the benchmark on your own machine before drawing broader conclusions
+- Every emitted trace in this rerun reaches `hv_ratio = 1` and `recall = 1`
+  before the `2s` budget expires.
+- `LTMOA_array` still completed on the same query in legacy-output mode
+  (`output/probes-q175189/LTMOA_array-t1.csv`), so the missing canonical row
+  appears to be an export-path problem rather than a lack of feasible labels.
+- `SOPMOA_bucket` remains excluded because it is still unstable on local runs.
+- These numbers are single-machine local observations, not publication claims.
 
 ## Project Layout
 
