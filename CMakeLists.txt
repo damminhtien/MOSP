@@ -46,6 +46,13 @@ target_link_libraries(main PUBLIC TBB::tbb)
 
 if(BUILD_TESTING)
     add_executable(
+        thread_config_smoke
+        tests/thread_config_smoke.cpp
+    )
+    target_include_directories(thread_config_smoke PRIVATE inc)
+    add_test(NAME thread_config_smoke COMMAND thread_config_smoke)
+
+    add_executable(
         linkedlist_smoke
         tests/linkedlist_smoke.cpp
     )
