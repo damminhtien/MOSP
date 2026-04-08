@@ -1,89 +1,84 @@
-# Build a fresh Release directory on macOS with Homebrew dependencies.
-PREFIXES="$(brew --prefix boost);$(brew --prefix tbb);$(brew --prefix libomp)"
+# Configure and build a fresh Release directory.
+PREFIXES="$(brew --prefix boost);$(brew --prefix tbb)"
 cmake -S . -B Release \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_PREFIX_PATH="$PREFIXES" \
-  -DOpenMP_ROOT="$(brew --prefix libomp)"
-cmake --build Release -j
+  -DCMAKE_PREFIX_PATH="$PREFIXES"
+cmake --build Release -j4
 
-# Show the current CLI.
+# Show the current canonical CLI.
 ./Release/main --help
 
-# Prepare local output directories.
-mkdir -p output
-mkdir -p output/bench
-mkdir -p output/SOPMOA
+# Prepare output directories for canonical artifacts.
+mkdir -p output/frontiers
+mkdir -p output/traces
+mkdir -p output/readme-bench/frontiers
+mkdir -p output/readme-bench/traces
 
-# Single-query SOPMOA smoke test on the 3-objective NYC maps.
+# Single-query LTMOA smoke run.
 ./Release/main \
   -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
-  -s 88959 \
-  -t 96072 \
-  -o output/sopmoa_smoke.csv \
-  -a SOPMOA \
-  --timelimit 2 \
-  -n 4
+  -s 96000 \
+  -t 38000 \
+  -a LTMOA \
+  --budget-sec 0.05 \
+  --summary-output output/summary.csv \
+  --frontier-output-dir output/frontiers \
+  --trace-output-dir output/traces \
+  --dataset-id nyc_3obj \
+  --query-id single_smoke
 
-# Single-query SOPMOA_relaxed smoke test on the same query.
+# Single-query SOPMOA_relaxed smoke run with 4 threads.
 ./Release/main \
   -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
-  -s 88959 \
-  -t 96072 \
-  -o output/sopmoa_relaxed_smoke.csv \
+  -s 96000 \
+  -t 38000 \
   -a SOPMOA_relaxed \
-  --timelimit 2 \
-  -n 4
+  -n 4 \
+  --budget-sec 0.05 \
+  --summary-output output/summary.csv \
+  --frontier-output-dir output/frontiers \
+  --trace-output-dir output/traces \
+  --dataset-id nyc_3obj \
+  --query-id relaxed_smoke
 
-# Scenario-based SOPMOA run for the first query in scen/query3.json.
+# Scenario-mode smoke run.
 ./Release/main \
   -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
-  --scenario scen/query3.json \
+  --scenario scen/query6.json \
   --from 0 \
   --to 1 \
-  -o output/sopmoa_query3.csv \
-  --logsols output/SOPMOA \
   -a SOPMOA \
-  --timelimit 2 \
-  -n 4
+  -n 4 \
+  --budget-sec 0.05 \
+  --summary-output output/scenario-summary.csv \
+  --frontier-output-dir output/frontiers \
+  --trace-output-dir output/traces \
+  --dataset-id nyc_3obj \
+  --query-id scenario_smoke
 
-# Local comparison benchmark used in README.md.
+# Small comparison sweep, including SOPMOA with 4 threads.
 for ALG in SOPMOA SOPMOA_relaxed LTMOA LazyLTMOA LTMOA_array LazyLTMOA_array EMOA NWMOA; do
+  THREAD_ARGS=()
+  if [ "$ALG" = "SOPMOA" ] || [ "$ALG" = "SOPMOA_relaxed" ]; then
+    THREAD_ARGS=(-n 4)
+  fi
+
   ./Release/main \
     -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
-    -s 88959 \
-    -t 96072 \
-    -o "output/bench/${ALG}.csv" \
+    -s 175000 \
+    -t 189000 \
     -a "$ALG" \
-    --timelimit 2 \
-    -n 4
+    "${THREAD_ARGS[@]}" \
+    --budget-sec 2 \
+    --summary-output output/readme-bench/summary.csv \
+    --frontier-output-dir output/readme-bench/frontiers \
+    --trace-output-dir output/readme-bench/traces \
+    --dataset-id nyc_3obj \
+    --query-id "$ALG"
 done
 
-# 5-run comparison used to validate SOPMOA_relaxed.
-for ALG in SOPMOA LTMOA SOPMOA_relaxed; do
-  for RUN in 1 2 3 4 5; do
-    ./Release/main \
-      -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
-      -s 88959 \
-      -t 96072 \
-      -o "output/bench/${ALG}-${RUN}.csv" \
-      -a "$ALG" \
-      --timelimit 2 \
-      -n 4
-  done
-done
+# Run the correctness harness.
+./scripts/run_correctness_harness.sh Release
 
-# Optional: inspect the benchmark CSV files.
-for CSV in output/bench/*.csv; do
-  echo "== $CSV =="
-  cat "$CSV"
-done
-
-# SOPMOA_bucket currently aborts locally on the same benchmark query.
-./Release/main \
-  -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
-  -s 88959 \
-  -t 96072 \
-  -o output/bench/SOPMOA_bucket.csv \
-  -a SOPMOA_bucket \
-  --timelimit 2 \
-  -n 4
+# Run the measurement smoke tests directly.
+ctest --test-dir Release --output-on-failure -R benchmark_metrics_smoke

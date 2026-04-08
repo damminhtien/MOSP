@@ -1,390 +1,249 @@
 # MOSP: Exact Multi-Objective Shortest-Path Solvers
 
-[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](#)
-[![CMake](https://img.shields.io/badge/CMake-3.16%2B-blue.svg)](#)
-[![oneTBB](https://img.shields.io/badge/oneTBB-enabled-brightgreen.svg)](#)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-orange.svg)](#license)
+This repository is a canonical-only C++17 workbench for exact multi-objective
+shortest-path search. The codebase centers on three things:
 
-This repository is a C++17 project for exact multi-objective shortest-path
-(MOSP) search on weighted graphs. It includes several serial exact baselines,
-parallel experimental solvers, scenario runners, and benchmark artifact export
-for final frontiers and anytime traces.
+- exact frontier-search solvers
+- one shared instrumentation and artifact model
+- one fast correctness harness for regression safety
 
-The repository originally centered on the SOPMOA family, but the codebase is
-better understood as a broader MOSP solver workbench:
+Backward-compatibility paths have been removed. There is no legacy CSV mode,
+no `--output`, no `--timelimit`, and no ad hoc solution-log export path.
 
-- exact serial baselines for comparison
-- parallel SOPMOA-family variants
-- shared graph loading and heuristic infrastructure
-- legacy CSV output and canonical benchmark artifacts
+## Stage Status
 
-## Implemented Solvers
+The repository is currently aligned to four completed stages:
 
-| Solver | Category | Notes |
+1. Instrumentation core
+   One benchmark pipeline based on summary, frontier, and trace artifacts.
+2. Measurement semantics
+   Shared wall-clock runtime and unified counter meanings across migrated solvers.
+3. Deterministic frontier export
+   Final target-frontier artifacts are canonical, sorted, and stable.
+4. Correctness harness
+   Synthetic exactness and regression checks are built into CTest.
+
+## Solver Status
+
+| Solver | Category | Current status |
 | --- | --- | --- |
-| `SOPMOA` | parallel exact | Original shared-OPEN solver |
-| `SOPMOA_relaxed` | parallel exact | Work-first relaxed solver with worker-local queues |
-| `SOPMOA_bucket` | parallel experimental | Bucket-queue variant; still unstable on some benchmark runs |
-| `LTMOA` | serial exact | List-backed exact baseline |
-| `LazyLTMOA` | serial exact | Lazier variant of LTMOA |
-| `LTMOA_array` | serial exact | Array-backed exact baseline |
-| `LazyLTMOA_array` | serial exact | Lazy array-backed baseline |
-| `EMOA` | serial exact | AVL-tree-backed exact baseline |
-| `NWMOA` | serial exact | Ordered frontier / bucketed OPEN variant |
+| `SOPMOA` | parallel exact | migrated to canonical instrumentation |
+| `SOPMOA_relaxed` | parallel exact | migrated to canonical instrumentation |
+| `SOPMOA_bucket` | parallel experimental | instrumented, but still excluded from the small in-process correctness matrix |
+| `LTMOA` | serial exact | migrated |
+| `LazyLTMOA` | serial exact | migrated |
+| `LTMOA_array` | serial exact | migrated |
+| `LazyLTMOA_array` | serial exact | migrated |
+| `EMOA` | serial exact | migrated |
+| `NWMOA` | serial exact | migrated |
 
-## Current Status
-
-- The repository builds as a normal CMake C++17 project.
-- Canonical benchmark artifacts are supported through:
-  - `--summary-output`
-  - `--frontier-output-dir`
-  - `--trace-output-dir`
-- Solver traces now export finite `hv_ratio` and `recall` when a run completes
-  through the canonical instrumentation path.
-- `SOPMOA_bucket` remains experimental; true `crash` and `oom` classification is
-  still better handled by an external runner than by in-process tests.
-- The checked-in `build/` directory contains stale machine-specific CMake cache
-  and should not be reused.
-
-## Requirements
-
-- CMake 3.16+
-- A C++17 compiler
-- Boost `program_options`
-- oneTBB
-
-OpenMP is optional in the current build. If CMake finds it, it will be linked;
-if not, the project still builds.
+## Build
 
 ### macOS
 
 ```bash
 brew install cmake boost tbb
-```
-
-Optional:
-
-```bash
-brew install libomp
-```
-
-### Ubuntu / Debian
-
-```bash
-sudo apt update
-sudo apt install -y build-essential cmake libboost-program-options-dev libtbb-dev
-```
-
-Optional:
-
-```bash
-sudo apt install -y libomp-dev
-```
-
-## Build
-
-Use a fresh build directory such as `Release/`.
-
-### macOS / Homebrew
-
-```bash
-PREFIXES="$(brew --prefix boost);$(brew --prefix tbb)"
-
 cmake -S . -B Release \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_PREFIX_PATH="$PREFIXES"
-
-cmake --build Release -j
-./Release/main --help
+  -DCMAKE_PREFIX_PATH="$(brew --prefix boost);$(brew --prefix tbb)"
+cmake --build Release -j4
 ```
 
 ### Linux
 
 ```bash
+sudo apt update
+sudo apt install -y build-essential cmake libboost-program-options-dev libtbb-dev
 cmake -S . -B Release -DCMAKE_BUILD_TYPE=Release
-cmake --build Release -j
-./Release/main --help
+cmake --build Release -j4
 ```
 
-## CLI Summary
+OpenMP is optional. If present it is linked, but runtime measurement semantics
+do not depend on OpenMP timing.
 
-At least one output target is required:
+## CLI
 
-- legacy CSV: `--output`
-- canonical summary CSV: `--summary-output`
-- canonical frontier artifacts: `--frontier-output-dir`
-- canonical trace artifacts: `--trace-output-dir`
+The executable is `./Release/main`.
+
+At least one canonical output target is required:
+
+- `--summary-output <file>`
+- `--frontier-output-dir <dir>`
+- `--trace-output-dir <dir>`
 
 Main options:
 
-- `-m, --map <file1> [file2 ...]`: one map file per objective
-- `-a, --algorithm <NAME>`:
-  `SOPMOA | SOPMOA_relaxed | SOPMOA_bucket | LTMOA | LazyLTMOA | LTMOA_array | LazyLTMOA_array | EMOA | NWMOA`
-- `-s, --start <node>` / `-t, --target <node>`: single query
-- `--scenario <file.json>`: batch mode from scenario file
-- `--from <i>` / `--to <j>`: scenario slice
-- `--timelimit <seconds>`: legacy cutoff argument
-- `--budget-sec <seconds>`: canonical benchmark budget argument
-- `-n, --numthreads <N>`: used by the parallel solvers
-- `--logsols <dir>`: dump solution fronts as text files
-- `--dataset-id <id>` / `--query-id <id>` / `--seed <value>`: benchmark metadata
-- `--trace-interval-ms <ms>`: periodic trace export; `0` means frontier-change events only
+- `-m, --map <file1> [file2 ...]`
+- `-a, --algorithm <NAME>`
+- `-s, --start <node>`
+- `-t, --target <node>`
+- `--scenario <file.json>`
+- `--from <i>`
+- `--to <j>`
+- `--budget-sec <seconds>`
+- `-n, --numthreads <N>`
+- `--dataset-id <id>`
+- `--query-id <id>`
+- `--seed <value>`
+- `--trace-interval-ms <ms>`
 
 Threading behavior:
 
 - `SOPMOA` caps `-n` at `12`
 - `SOPMOA_bucket` caps `-n` at `16`
 - `SOPMOA_relaxed` uses the requested thread count directly
-- serial baselines ignore `-n`
+- serial solvers run single-threaded
 
 ## Quick Start
 
-Single-query run with legacy CSV output:
-
-```bash
-mkdir -p output
-
-./Release/main \
-  -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
-  -s 88959 \
-  -t 96072 \
-  -o output/ltmoa_array.csv \
-  -a LTMOA_array \
-  --timelimit 2
-```
-
-Single-query canonical benchmark export:
+Single-query run:
 
 ```bash
 mkdir -p output/frontiers output/traces
 
 ./Release/main \
   -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
-  -s 88959 \
-  -t 96072 \
-  -a SOPMOA_relaxed \
-  --budget-sec 2 \
-  -n 4 \
+  -s 96000 \
+  -t 38000 \
+  -a LTMOA \
+  --budget-sec 0.05 \
   --summary-output output/summary.csv \
   --frontier-output-dir output/frontiers \
   --trace-output-dir output/traces \
   --dataset-id nyc_3obj \
-  --query-id q0 \
-  --trace-interval-ms 100
+  --query-id single_smoke
 ```
 
-Scenario run with solution dumps:
+Scenario slice:
 
 ```bash
-mkdir -p output/sols
+mkdir -p output/frontiers output/traces
 
 ./Release/main \
   -m maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt \
-  --scenario scen/query3.json \
+  --scenario scen/query6.json \
   --from 0 \
   --to 1 \
   -a SOPMOA_relaxed \
-  --timelimit 2 \
   -n 4 \
-  -o output/scenario.csv \
-  --logsols output/sols
+  --budget-sec 0.05 \
+  --summary-output output/summary.csv \
+  --frontier-output-dir output/frontiers \
+  --trace-output-dir output/traces \
+  --dataset-id nyc_3obj \
+  --query-id scenario_smoke
 ```
 
-## Input Data
+## Canonical Artifacts
 
-### Map Files
+Every migrated solver reports through the same artifact model.
 
-The loader expects DIMACS-style arc lines:
+### Summary CSV
+
+One row per query:
 
 ```text
-c optional comment
-a <from> <to> <weight>
+schema_version,solver_name,dataset_id,query_id,start_node,target_node,num_objectives,
+threads_requested,threads_effective,budget_sec,runtime_sec,status,completed,seed,
+generated_labels,expanded_labels,pruned_by_target,pruned_by_node,pruned_other,
+target_hits_raw,final_frontier_size,peak_open_size,peak_live_labels,
+target_frontier_checks,node_frontier_checks,time_to_first_solution_sec,
+frontier_artifact_path,trace_artifact_path
 ```
 
-When multiple map files are passed, they must describe the same edge list in
-the same order. Each file contributes one objective.
+Counter meanings:
 
-Repository examples:
+- `generated_labels`: labels created and enqueued successfully
+- `expanded_labels`: accepted labels that entered valid successor expansion
+- `pruned_by_target`: rejected by target-frontier dominance
+- `pruned_by_node`: rejected by node-frontier dominance
+- `pruned_other`: stale or uncategorized rejections
+- `target_hits_raw`: accepted target labels before final frontier normalization
+- `final_frontier_size`: size of the final nondominated target frontier
+- `peak_open_size`: maximum observed queued-label count
+- `peak_live_labels`: maximum observed live-label count
 
-- `maps/NY-d.txt`
-- `maps/NY-t.txt`
-- `maps/NY-m.txt`
-- `maps/NY-r.txt`
-- `maps/NY-l.txt`
-
-### Scenario JSON
-
-Scenario files are JSON arrays of objects with:
-
-- `name`
-- `start_data`
-- `end_data`
-
-Example:
-
-```json
-[
-  { "name": "query3_1", "start_data": 88959, "end_data": 96072 },
-  { "name": "query3_2", "start_data": 172570, "end_data": 197762 }
-]
-```
-
-## Output Formats
-
-### Legacy CSV
-
-Legacy `--output` rows use:
+### Frontier CSV
 
 ```text
-solver_name,start,target,generated,expanded,num_solutions,runtime_sec
+time_found_sec,obj1,obj2,...
 ```
 
-Example:
+The exported frontier is the final nondominated target frontier. Rows are
+sorted deterministically in lexicographic objective order.
+
+### Trace CSV
 
 ```text
-LTMOA(3obj)-list,88959,96072,317047,303935,932,3.46159
+time_sec,trigger,frontier_size,generated_labels,expanded_labels,
+pruned_by_target,pruned_by_node,pruned_other,target_hits_raw,hv_ratio,recall
 ```
 
-### Solution Dumps
+Runtime measurement uses one source everywhere: `BenchmarkClock` over
+`std::chrono::steady_clock`.
 
-When `--logsols` is enabled, each query writes one text file:
+## Correctness Harness
 
-```text
-<start>-<target>-<num_objectives>obj.txt
+The phase-4 correctness harness is built into the project.
+
+Primary command:
+
+```bash
+./scripts/run_correctness_harness.sh Release
 ```
 
-Each line is one Pareto cost vector:
+Equivalent manual commands:
 
-```text
-[12,45,78]
-[13,43,81]
+```bash
+/usr/local/bin/cmake --build Release -j4
+ctest --test-dir Release --output-on-failure -R correctness_harness
 ```
 
-### Canonical Benchmark Artifacts
+The harness checks:
 
-Canonical benchmark mode can write:
+- exact frontier equality against an internal exhaustive reference
+- no dominated point in exported frontiers
+- no duplicate point in exported frontiers
+- deterministic lex-sorted frontier export
+- `SOPMOA(1) == SOPMOA(4)` on the synthetic set
+- `SOPMOA_relaxed(1) == SOPMOA_relaxed(4)` on the synthetic set
+- `SOPMOA(1) == SOPMOA_relaxed(1)` on the synthetic set
+- measurement invariants such as `generated_labels >= expanded_labels`
 
-- a summary CSV with run metadata, counters, status, and artifact paths
-- one final-frontier CSV per query
-- one anytime-trace CSV per query
+Covered synthetic families:
 
-Frontier artifacts store:
+- `small_grid`
+- `layered_dag`
+- `random_sparse`
+- `correlated_weights`
+- `anti_correlated`
+- `tie_heavy`
 
-- `time_found_sec`
-- `obj1, obj2, ...`
+Covered objective counts:
 
-Trace artifacts store:
+- `2`
+- `3`
+- `4`
 
-- `time_sec`
-- `trigger`
-- `frontier_size`
-- generated / expanded / pruned counters
-- `hv_ratio`
-- `recall`
+See `tests/correctness_harness.cpp` and `data/synthetic/README.md`.
 
-## Benchmark Snapshot
+## Repo Guide
 
-The table below is a fresh local rerun from the current instrumentation build.
-It uses one shared 3-objective NYC query and keeps `SOPMOA -n 4` in the same
-comparison set as the serial exact solvers.
+- `src/main.cpp`: CLI, solver dispatch, benchmark artifact wiring
+- `inc/algorithms/abstract_solver.h`: shared solver and instrumentation hooks
+- `src/algorithms/`: solver implementations
+- `inc/algorithms/gcl/`: frontier containers and dominance structures
+- `tests/benchmark_metrics_smoke.cpp`: measurement semantics smoke tests
+- `tests/correctness_harness.cpp`: phase-4 exactness harness
+- `scripts/run_correctness_harness.sh`: local correctness entrypoint
+- `ARCHITECTURE.md`: maintainer-oriented code map
+- `run_command.txt`: reproducible local command cookbook
+- `AGENTS.md`: project guidance for future code changes
 
-Setup:
+## Current Gaps
 
-- date: April 7, 2026
-- maps: `maps/NY-d.txt maps/NY-t.txt maps/NY-m.txt`
-- query: `175000 -> 189000`
-- benchmark budget: `2s`
-- artifact root: `output/readme-bench-20260407-233501`
-- export wall guard: `120s` per solver while generating README artifacts
-
-| Solver | Threads | Status | Runtime (s) | Generated | Expanded | Final frontier | First solution (s) | Full recall (s) |
-| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `SOPMOA` | 4 | `timeout` | `2.00154` | `436,426` | `349,095` | `258` | `0.00712` | `1.94448` |
-| `SOPMOA_relaxed` | 4 | `timeout` | `2.00360` | `652,729` | `520,082` | `250` | `0.06858` | `1.86112` |
-| `LTMOA` | 1 | `timeout` | `2.00088` | `417,965` | `334,834` | `256` | `0.00032` | `1.92864` |
-| `LazyLTMOA` | 1 | `timeout` | `2.00080` | `966,783` | `318,028` | `251` | `0.00033` | `1.92840` |
-| `LTMOA_array` | 1 | `no row` | — | — | — | — | — | — |
-| `LazyLTMOA_array` | 1 | `timeout` | `2.00140` | `1,805,707` | `589,029` | `317` | `0.00178` | `1.97505` |
-| `EMOA` | 1 | `timeout` | `2.00116` | `523,113` | `418,435` | `276` | `0.00037` | `1.99198` |
-| `NWMOA` | 1 | `timeout` | `2.00314` | `641,734` | `309,833` | `250` | `0.00390` | `1.88331` |
-
-What this rerun shows:
-
-- `SOPMOA_relaxed -n 4` reaches full recall earliest in this run, but it does
-  so by expanding substantially more labels than `SOPMOA -n 4`.
-- `SOPMOA -n 4` stays cheaper in generated and expanded work than
-  `SOPMOA_relaxed -n 4` and still ends the budget with a slightly larger
-  frontier (`258` vs `250`).
-- Among the 1-thread exact solvers that emitted canonical rows, `NWMOA` reaches
-  full recall earliest, while `LazyLTMOA_array` finishes the budget with the
-  largest frontier and the highest label-generation cost.
-
-## Trace Artifacts
-
-The rerun emitted these canonical trace/frontier pairs:
-
-| Solver | Trace artifact | Frontier artifact |
-| --- | --- | --- |
-| `SOPMOA -n 4` | `output/readme-bench-20260407-233501/traces/SOPMOA_3obj_4threads_-custom_list__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/SOPMOA_3obj_4threads_-custom_list__nyc_3obj__q175000_189000.csv` |
-| `SOPMOA_relaxed -n 4` | `output/readme-bench-20260407-233501/traces/SOPMOA_relaxed_3obj_4threads_-optimistic_vector__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/SOPMOA_relaxed_3obj_4threads_-optimistic_vector__nyc_3obj__q175000_189000.csv` |
-| `LTMOA -n 1` | `output/readme-bench-20260407-233501/traces/LTMOA_3obj_-list__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/LTMOA_3obj_-list__nyc_3obj__q175000_189000.csv` |
-| `LazyLTMOA -n 1` | `output/readme-bench-20260407-233501/traces/LazyLTMOA_3obj_-list__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/LazyLTMOA_3obj_-list__nyc_3obj__q175000_189000.csv` |
-| `LazyLTMOA_array -n 1` | `output/readme-bench-20260407-233501/traces/LazyLTMOA_3obj_-array__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/LazyLTMOA_3obj_-array__nyc_3obj__q175000_189000.csv` |
-| `EMOA -n 1` | `output/readme-bench-20260407-233501/traces/EMOA_3obj_-avl_tree__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/EMOA_3obj_-avl_tree__nyc_3obj__q175000_189000.csv` |
-| `NWMOA -n 1` | `output/readme-bench-20260407-233501/traces/NWMOA_3obj_-custom_list2__nyc_3obj__q175000_189000.csv` | `output/readme-bench-20260407-233501/frontiers/NWMOA_3obj_-custom_list2__nyc_3obj__q175000_189000.csv` |
-| `LTMOA_array -n 1` | no trace emitted before the `120s` wall guard | no frontier emitted before the `120s` wall guard |
-
-Notes:
-
-- Every emitted trace in this rerun reaches `hv_ratio = 1` and `recall = 1`
-  before the `2s` budget expires.
-- `LTMOA_array` still completed on the same query in legacy-output mode
-  (`output/probes-q175189/LTMOA_array-t1.csv`), so the missing canonical row
-  appears to be an export-path problem rather than a lack of feasible labels.
-- `SOPMOA_bucket` remains excluded because it is still unstable on local runs.
-- These numbers are single-machine local observations, not publication claims.
-
-## Project Layout
-
-```text
-.
-├── CMakeLists.txt
-├── README.md
-├── ARCHITECTURE.md
-├── run_command.txt
-├── inc/
-│   ├── algorithms/
-│   ├── problem/
-│   └── utils/
-├── src/
-│   ├── algorithms/
-│   ├── problem/
-│   └── utils/
-├── maps/
-├── scen/
-├── query_generator.py
-├── query_random.py
-├── Poster.pdf
-└── Preprint.pdf
-```
-
-## Citation
-
-If you use this repository in academic work, cite the associated SOPMOA paper
-when appropriate:
-
-```bibtex
-@inproceedings{YourSOPMOA2025,
-  title     = {SOPMOA*: Shared-OPEN Parallel A* for Multi-Objective Shortest Paths},
-  author    = {Truong, L.V., Dam, T.M., Nguyen, T.A., Nguyen, L.T.T., Dinh, D.T.},
-  booktitle = {Proceedings of Computational Science - ICCS 2025. ICCS 2025. Lecture Notes in Computer Science, vol 15906. Springer, Cham},
-  year      = {2025},
-  note      = {Code: https://github.com/damminhtien/SOPMOA}
-}
-```
-
-## Acknowledgments
-
-This codebase builds on prior exact MOSP solvers in the literature, especially
-LTMOA, EMOA, NWMOA, and the SOPMOA family, and uses Boost and oneTBB in the
-implementation.
+- `SOPMOA_bucket` remains unstable enough that it is not part of the small
+  in-process correctness matrix.
+- True `crash` and `oom` classification still belongs in an external runner.
+- The correctness harness is intentionally small and fast; it is not a large
+  benchmark suite.

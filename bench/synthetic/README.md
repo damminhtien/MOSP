@@ -1,7 +1,10 @@
 # Synthetic Bench Notes
 
-This directory is reserved for future larger synthetic benchmark suites.
+This directory is reserved for larger synthetic benchmark campaigns.
 
-Phase 4 correctness coverage stays intentionally small and fast, so the active
-fixtures live in code under `tests/correctness_harness.cpp` and the checked-in
-reference artifact lives under `data/synthetic/`.
+The current repository focus is correctness-first, so the active synthetic
+fixtures live in `tests/correctness_harness.cpp` and the checked-in deterministic
+artifact example lives under `data/synthetic/`.
+
+Use this directory only when adding benchmark suites that are intentionally
+larger or slower than the phase-4 regression harness.

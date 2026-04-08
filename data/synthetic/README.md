@@ -1,7 +1,7 @@
 # Synthetic Correctness Data
 
-Phase 4 correctness tests use programmatically generated DAG fixtures instead of
-large checked-in graph files.
+Phase 4 correctness testing uses generated DAG fixtures rather than large
+checked-in graph files.
 
 Covered families:
 
@@ -12,16 +12,18 @@ Covered families:
 - `anti_correlated`
 - `tie_heavy`
 
-Objective counts covered by the harness:
+Covered objective counts:
 
 - `2`
 - `3`
 - `4`
 
-Each family exposes a small query set labeled `easy`, `medium`, and `hard`
-inside `tests/correctness_harness.cpp`.
+Each family exposes small `easy`, `medium`, and `hard` queries inside
+`tests/correctness_harness.cpp`.
 
-The checked-in CSV below is a fixed frontier artifact used to prove that
-frontier export formatting is deterministic for a known finalized metric set:
+The checked-in artifact in this directory is:
 
 - `expected_frontier_example.csv`
+
+That file is used by the correctness harness to prove that frontier export is
+deterministic and format-stable for a known finalized frontier.
