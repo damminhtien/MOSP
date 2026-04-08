@@ -1,0 +1,16 @@
+{
+  "manifest_version": "dataset_manifest_v1",
+  "dataset_id": "nyc_3obj",
+  "description": "NYC example graph with distance, travel time, and monetary objectives.",
+  "objective_files": [
+    "maps/NY-d.txt",
+    "maps/NY-t.txt",
+    "maps/NY-m.txt"
+  ],
+  "num_objectives": 3,
+  "source_type": "real",
+  "notes": [
+    "Primary benchmark dataset used by the current README examples.",
+    "The objective files already exist in the repository root under maps/."
+  ]
+}

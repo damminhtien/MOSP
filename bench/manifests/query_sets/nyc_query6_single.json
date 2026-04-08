@@ -1,0 +1,19 @@
+{
+  "manifest_version": "query_set_manifest_v1",
+  "query_set_id": "nyc_query6_single",
+  "dataset_id": "nyc_3obj",
+  "description": "Single benchmark query derived from scen/query6.json for focused runs.",
+  "source": {
+    "type": "scenario_json",
+    "path": "scen/query6.json"
+  },
+  "queries": [
+    {
+      "query_id": "query3_6",
+      "start": 175000,
+      "target": 189000,
+      "difficulty": "hard",
+      "source": "scen/query6.json"
+    }
+  ]
+}

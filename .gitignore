@@ -1,5 +1,7 @@
 Release/**
 Debug/**
 output/**
+bench/results/*
+!bench/results/README.md
 .omx/
 .codex/

@@ -1,0 +1,18 @@
+{
+  "manifest_version": "query_set_manifest_v1",
+  "query_set_id": "nyc_trivial_completion",
+  "dataset_id": "nyc_3obj",
+  "description": "Trivial self-query set used to validate completion-mode orchestration and artifact layout.",
+  "source": {
+    "type": "manifest_only"
+  },
+  "queries": [
+    {
+      "query_id": "self_96000",
+      "start": 96000,
+      "target": 96000,
+      "difficulty": "easy",
+      "source": "manifest"
+    }
+  ]
+}
