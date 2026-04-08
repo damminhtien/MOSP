@@ -2,7 +2,8 @@
 
 This document is the maintainer view of the current codebase after the legacy
 benchmark path was removed. It explains how execution flows, where measurement
-semantics live, how correctness is checked, and how benchmarks are orchestrated.
+semantics live, how correctness is checked, and how benchmark suites are
+orchestrated and recorded.
 
 ## Project Shape
 
@@ -50,6 +51,8 @@ manifests, query manifests, and benchmark configs into organized suites under
 - `bench/scripts/run_benchmarks.py`
   Config-driven benchmark orchestration, environment capture, run identity, and
   result layout.
+  The phase-6 primary entrypoint is `bench/scripts/run_benchmark.py`; the plural
+  script is only a thin compatibility shim.
 
 ## Shared Solver Layer
 
@@ -194,7 +197,7 @@ Key directories:
 - `bench/scripts/`
 - `bench/results/`
 
-The runner in `bench/scripts/run_benchmarks.py` does not replace `main`. It
+The runner in `bench/scripts/run_benchmark.py` does not replace `main`. It
 wraps `main` and standardizes:
 
 - dataset selection
@@ -205,6 +208,9 @@ wraps `main` and standardizes:
 - retry or fail-fast policy
 - environment capture
 - result placement
+- suite-level summary aggregation
+- wrapper-level peak RSS capture
+- timeout and crash classification
 
 Current supported modes:
 
@@ -218,6 +224,7 @@ Each suite writes:
 - `resolved_config.json`
 - `run_plan.json`
 - `run_results.json`
+- `summary.csv`
 - `runs/<run_id>/...`
 
 Each run directory contains canonical solver outputs plus runner metadata and
@@ -238,6 +245,9 @@ The repository state after the current cleanup is:
 5. Stage 5
    Benchmark harness covers datasets, query sets, benchmark modes, and
    organized result suites.
+6. Stage 6
+   Benchmark runner writes suite-level summary rows, peak RSS, and robust
+   timeout/crash/build-error artifacts.
 
 ## Known Limits
 

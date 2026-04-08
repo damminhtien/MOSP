@@ -19,13 +19,15 @@ The default agent posture is:
 
 ## Active Project State
 
-The repository currently reflects five completed stages:
+The repository currently reflects six completed stages:
 
 1. shared instrumentation core
 2. unified measurement semantics
 3. deterministic final-frontier export
 4. correctness harness for exactness and regression safety
 5. manifest-driven benchmark harness with organized result suites
+6. suite-level benchmark runner with summary aggregation, memory capture, and
+   robust run classification
 
 ## Primary Mission
 
@@ -100,7 +102,9 @@ For optimization, benchmarking, or parallelization work, follow this order:
 - `tests/correctness_harness.cpp`
   Exactness and determinism harness.
 - `bench/scripts/run_benchmarks.py`
-  Manifest-driven benchmark runner.
+  Compatibility shim for the primary benchmark runner.
+- `bench/scripts/run_benchmark.py`
+  Primary benchmark runner with suite summary aggregation and wrapper metadata.
 - `bench/manifests/`
   Dataset and query-set manifests.
 - `bench/configs/`
@@ -180,7 +184,7 @@ ctest --test-dir Release --output-on-failure -R "benchmark_metrics_smoke|correct
 For benchmark-runner or benchmark-config changes, also run at least one config:
 
 ```bash
-python3 bench/scripts/run_benchmarks.py --config bench/configs/timecap.yaml --suite-id local_smoke
+python3 bench/scripts/run_benchmark.py --config bench/configs/timecap.yaml --suite-id local_smoke
 ```
 
 ## Reporting Contract

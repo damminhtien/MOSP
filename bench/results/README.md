@@ -11,4 +11,5 @@ Each suite creates a timestamped or user-supplied `suite_id` directory with:
 - `resolved_config.json`
 - `run_plan.json`
 - `run_results.json`
+- `summary.csv`
 - `runs/<run_id>/...`

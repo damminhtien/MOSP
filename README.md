@@ -12,7 +12,7 @@ no `--output`, no `--timelimit`, and no ad hoc solution-log export path.
 
 ## Stage Status
 
-The repository is currently aligned to five completed stages:
+The repository is currently aligned to six completed stages:
 
 1. Instrumentation core
    One benchmark pipeline based on summary, frontier, and trace artifacts.
@@ -25,6 +25,9 @@ The repository is currently aligned to five completed stages:
 5. Benchmark harness
    Dataset manifests, query manifests, benchmark modes, and config-driven runs
    now live under `bench/`.
+6. Benchmark runner
+   Suite-level summary aggregation, wrapper RSS capture, timeout/crash handling,
+   and standardized benchmark artifacts now live in the runner.
 
 ## Solver Status
 
@@ -237,7 +240,7 @@ Phase 5 adds a config-driven benchmark layer.
 Primary command:
 
 ```bash
-python3 bench/scripts/run_benchmarks.py --config bench/configs/timecap.yaml
+python3 bench/scripts/run_benchmark.py --config bench/configs/timecap.yaml
 ```
 
 Supported benchmark modes:
@@ -274,6 +277,7 @@ Each suite writes:
 - `resolved_config.json`
 - `run_plan.json`
 - `run_results.json`
+- `summary.csv`
 - `runs/<run_id>/summary.csv`
 - `runs/<run_id>/frontiers/`
 - `runs/<run_id>/traces/`
@@ -283,9 +287,42 @@ Each suite writes:
 Run identity includes solver, threads, dataset, query set, mode, budget, repeat
 index, and git SHA.
 
+The suite `summary.csv` is the phase-6 benchmark table. It records one row per
+query execution with wrapper metadata and canonical artifact paths, including:
+
+- `run_id`
+- `dataset_id`
+- `query_set_id`
+- `query_id`
+- `solver`
+- `threads`
+- `mode`
+- `budget_sec`
+- `status`
+- `completed`
+- `runtime_sec`
+- `generated_labels`
+- `expanded_labels`
+- `pruned_by_target`
+- `pruned_by_node`
+- `pruned_other`
+- `final_frontier_size`
+- `peak_open_size`
+- `peak_live_labels`
+- `peak_rss_mb`
+- `time_to_first_solution_sec`
+- `trace_file`
+- `frontier_file`
+- `stdout_file`
+- `stderr_file`
+
+`peak_rss_mb` is currently captured by the runner on macOS/Linux from the
+process wrapper, not from the in-process C++ metrics layer.
+
 Example successful suite output from this phase:
 
 - `bench/results/phase5_timecap_smoke/`
+- `bench/results/phase6_timecap_demo_v2/`
 
 ## Repo Guide
 
@@ -295,7 +332,7 @@ Example successful suite output from this phase:
 - `inc/algorithms/gcl/`: frontier containers and dominance structures
 - `tests/benchmark_metrics_smoke.cpp`: measurement semantics smoke tests
 - `tests/correctness_harness.cpp`: phase-4 exactness harness
-- `bench/`: phase-5 benchmark manifests, configs, runner, and result layout
+- `bench/`: phase-5/6 benchmark manifests, configs, runner, and result layout
 - `scripts/run_correctness_harness.sh`: local correctness entrypoint
 - `ARCHITECTURE.md`: maintainer-oriented code map
 - `run_command.txt`: reproducible local command cookbook
