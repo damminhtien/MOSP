@@ -12,6 +12,7 @@
 #include"algorithms/nwmoa.h"
 
 #include"utils/data_io.h"
+#include"utils/thread_config.h"
 
 #include <string>
 #include <thread>
@@ -61,41 +62,6 @@ size_t validated_node_id(const char* option_name, int raw_value, size_t num_node
     }
 
     return value;
-}
-
-int validate_requested_threads(const po::variables_map& vm, const string& algorithm) {
-    const int requested_threads = vm["numthreads"].as<int>();
-    if (!option_was_explicit(vm, "numthreads") || requested_threads == -1) {
-        return requested_threads;
-    }
-
-    if (requested_threads <= 0) {
-        fail_cli("--numthreads must be positive when explicitly provided");
-    }
-
-    if (algorithm == "SOPMOA") {
-        if (requested_threads > 12) {
-            fail_cli("SOPMOA supports at most 12 threads");
-        }
-        return requested_threads;
-    }
-
-    if (algorithm == "SOPMOA_bucket") {
-        if (requested_threads > 16) {
-            fail_cli("SOPMOA_bucket supports at most 16 threads");
-        }
-        return requested_threads;
-    }
-
-    if (algorithm == "SOPMOA_relaxed") {
-        return requested_threads;
-    }
-
-    if (requested_threads != 1) {
-        fail_cli("--numthreads is only valid as 1 for serial solvers");
-    }
-
-    return requested_threads;
 }
 
 uint64_t validate_trace_interval_ms(const po::variables_map& vm) {
@@ -209,22 +175,6 @@ string resolve_query_id(const po::variables_map& vm, const string& fallback_quer
     return sanitize_artifact_component(explicit_query_id + "__" + fallback_query_id);
 }
 
-int effective_threads_for_algorithm(const string& algorithm, int requested_threads) {
-    if (algorithm == "SOPMOA") {
-        return requested_threads > 0 ? min(requested_threads, 12) : 12;
-    }
-    if (algorithm == "SOPMOA_bucket") {
-        return requested_threads > 0 ? min(requested_threads, 16) : 16;
-    }
-    if (algorithm == "SOPMOA_relaxed") {
-        if (requested_threads > 0) {
-            return requested_threads;
-        }
-        return max(1u, thread::hardware_concurrency());
-    }
-    return 1;
-}
-
 bool canonical_output_enabled(const po::variables_map& vm) {
     return !vm["summary-output"].as<string>().empty()
         || !vm["frontier-output-dir"].as<string>().empty()
@@ -259,18 +209,18 @@ void single_run(
     const string& dataset_id,
     const string& query_id,
     double budget_sec,
-    int requested_threads,
+    const SolverThreadConfig& thread_config,
     uint64_t trace_interval_ms,
     po::variables_map& vm
 ) {
     std::shared_ptr<AbstractSolver> solver;
 
     if (algorithm == "SOPMOA") {
-        solver = get_SOPMOA_solver(graph, inv_graph, start_node, target_node, requested_threads);
+        solver = get_SOPMOA_solver(graph, inv_graph, start_node, target_node, thread_config.effective_threads);
     } else if (algorithm == "SOPMOA_relaxed") {
-        solver = get_SOPMOA_relaxed_solver(graph, inv_graph, start_node, target_node, requested_threads);
+        solver = get_SOPMOA_relaxed_solver(graph, inv_graph, start_node, target_node, thread_config.effective_threads);
     } else if (algorithm == "SOPMOA_bucket") {
-        solver = get_SOPMOA_bucket_solver(graph, inv_graph, start_node, target_node, requested_threads);
+        solver = get_SOPMOA_bucket_solver(graph, inv_graph, start_node, target_node, thread_config.effective_threads);
     } else if (algorithm == "LTMOA") {
         solver = get_LTMOA_solver(graph, inv_graph, start_node, target_node);
     } else if (algorithm == "LazyLTMOA") {
@@ -309,8 +259,8 @@ void single_run(
         BenchmarkRunConfig config;
         config.dataset_id = dataset_id;
         config.query_id = query_id;
-        config.threads_requested = requested_threads;
-        config.threads_effective = effective_threads_for_algorithm(algorithm, config.threads_requested);
+        config.threads_requested = thread_config.requested_threads;
+        config.threads_effective = thread_config.effective_threads;
         config.budget_sec = budget_sec;
         config.trace_interval_ms = trace_interval_ms;
         config.seed = vm["seed"].as<string>();
@@ -401,7 +351,7 @@ void scenarios_run(
     const std::string& algorithm,
     const std::string& dataset_id,
     double budget_sec,
-    int requested_threads,
+    const SolverThreadConfig& thread_config,
     uint64_t trace_interval_ms,
     po::variables_map& vm
 ) {
@@ -448,7 +398,7 @@ void scenarios_run(
             dataset_id,
             resolve_query_id(vm, scenario_name, true),
             budget_sec,
-            requested_threads,
+            thread_config,
             trace_interval_ms,
             vm
         );
@@ -499,9 +449,19 @@ int main(int argc, char* argv[]) {
         const bool scenario_mode = !vm["scenario"].as<std::string>().empty();
         validate_mode_specific_arguments(vm, scenario_mode);
 
-        const int requested_threads = validate_requested_threads(vm, algorithm);
+        SolverThreadConfig thread_config;
+        try {
+            thread_config = resolve_solver_thread_config(
+                algorithm,
+                vm["numthreads"].as<int>(),
+                option_was_explicit(vm, "numthreads")
+            );
+        } catch (const std::invalid_argument& ex) {
+            fail_cli(ex.what());
+        }
         const uint64_t trace_interval_ms = validate_trace_interval_ms(vm);
         const double budget_sec = validate_budget_sec(vm);
+        emit_solver_thread_config_log(std::cerr, algorithm, thread_config);
 
         if (
             vm["summary-output"].as<std::string>().empty()
@@ -544,7 +504,7 @@ int main(int argc, char* argv[]) {
                 algorithm,
                 dataset_id,
                 budget_sec,
-                requested_threads,
+                thread_config,
                 trace_interval_ms,
                 vm
             );
@@ -558,7 +518,7 @@ int main(int argc, char* argv[]) {
                 dataset_id,
                 resolve_query_id(vm, build_single_query_id(start_node, target_node), false),
                 budget_sec,
-                requested_threads,
+                thread_config,
                 trace_interval_ms,
                 vm
             );

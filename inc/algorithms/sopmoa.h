@@ -1,6 +1,7 @@
 #ifndef ALGORITHM_SOPMOA
 #define ALGORITHM_SOPMOA
 
+#include <atomic>
 #include <tbb/concurrent_priority_queue.h>
 #include <tbb/concurrent_vector.h>
 
@@ -9,10 +10,9 @@
 #include"../problem/heuristic.h"
 #include"../utils/cost.h"
 #include"../utils/label.h"
+#include"../utils/thread_config.h"
 #include"abstract_solver.h"
 #include"gcl/gcl_sopmoa.h"
-
-const int NUM_THREADS = 12;
 
 template <int N>
 class SOPMOA: public AbstractSolver {
@@ -23,7 +23,8 @@ public:
     : AbstractSolver(adj_matrix, start_node, target_node),
     gcl_ptr(std::make_unique<Gcl_SOPMOA<N>>(adj_matrix.get_num_node())),
     heuristic(Heuristic<N>(target_node, inv_graph)), 
-    num_threads(num_threads > 0 ? std::min(num_threads, NUM_THREADS) : NUM_THREADS) {}
+    num_threads(resolve_parallel_worker_threads(num_threads)),
+    is_thread_activating(static_cast<size_t>(resolve_parallel_worker_threads(num_threads))) {}
 
     ~SOPMOA() {
         for (auto ptr : all_labels){ delete ptr; }
@@ -41,7 +42,7 @@ private:
     tbb::concurrent_priority_queue<Label<N>*, typename Label<N>::lex_larger_for_PQ> open;
     std::mutex all_labels_lock;
     mutable std::mutex benchmark_trace_lock;
-    std::array<std::atomic<bool>, NUM_THREADS> is_thread_activating;
+    std::vector<std::atomic<bool>> is_thread_activating;
     std::vector<FrontierPoint> target_frontier_;
     std::atomic<bool> timed_out{false};
     std::atomic<uint64_t> generated_labels_total_{0};

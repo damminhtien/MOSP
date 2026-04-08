@@ -1,4 +1,5 @@
 #include "algorithms/sopmoa_relaxed.h"
+#include "utils/thread_config.h"
 
 template<int N>
 SOPMOA_relaxed<N>::SOPMOA_relaxed(
@@ -10,7 +11,7 @@ SOPMOA_relaxed<N>::SOPMOA_relaxed(
 )
 : AbstractSolver(adj_matrix, start_node, target_node),
 heuristic(Heuristic<N>(target_node, inv_graph)),
-num_threads(num_threads > 0 ? num_threads : std::max(1u, std::thread::hardware_concurrency())),
+num_threads(resolve_parallel_worker_threads(num_threads)),
 gcl_ptr(std::make_unique<Gcl_relaxed<N>>(adj_matrix.get_num_node())) {
     initialize_workers();
 }
