@@ -399,13 +399,13 @@ Primary commands:
 
 ```bash
 python3 bench/scripts/aggregate_results.py \
-  --suite phase6_completion_demo \
-  --suite phase6_timecap_demo_v2 \
-  --suite phase7_scaling_demo \
-  --analysis-id phase7_demo
+  --suite paper_completion_demo \
+  --suite paper_timecap_demo \
+  --suite paper_scaling_demo \
+  --analysis-id paper_demo
 
 python3 bench/scripts/plot_results.py \
-  --input-dir bench/results/figures/phase7_demo
+  --input-dir bench/results/figures/paper_demo
 ```
 
 Aggregate outputs are written under:

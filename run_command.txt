@@ -21,11 +21,11 @@ python3 bench/scripts/aggregate_results.py \
   --suite local_completion \
   --suite local_timecap \
   --suite local_scaling \
-  --analysis-id local_phase7
+  --analysis-id local_analysis
 
 # Render deterministic figures from the aggregate output.
 python3 bench/scripts/plot_results.py \
-  --input-dir bench/results/figures/local_phase7
+  --input-dir bench/results/figures/local_analysis
 
 # Read the benchmark methodology docs.
 sed -n '1,200p' docs/benchmark-protocol.md

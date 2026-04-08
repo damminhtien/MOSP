@@ -41,7 +41,7 @@ def save_figure(fig: plt.Figure, output_dir: Path, stem: str) -> None:
     plt.close(fig)
 
 
-def plot_runtime_boxplot(all_runs: list[dict[str, str]], output_dir: Path) -> None:
+def plot_runtime_boxplot(all_runs: list[dict[str, str]], output_dir: Path) -> bool:
     groups: dict[str, list[float]] = {}
     for row in all_runs:
         if row["status"] in {"crash", "build_error", "skipped"} or row["mode"] == "completion":
@@ -51,7 +51,7 @@ def plot_runtime_boxplot(all_runs: list[dict[str, str]], output_dir: Path) -> No
 
     labels = sorted(groups)
     if not labels:
-        return
+        return False
 
     data = [groups[label] for label in labels]
     fig, ax = plt.subplots(figsize=(9, 5))
@@ -62,9 +62,10 @@ def plot_runtime_boxplot(all_runs: list[dict[str, str]], output_dir: Path) -> No
     ax.grid(axis="y", alpha=0.3)
     ax.tick_params(axis="x", rotation=20)
     save_figure(fig, output_dir, "runtime_boxplot")
+    return True
 
 
-def plot_scaling_curve(rows: list[dict[str, str]], output_dir: Path, value_key: str, title: str, ylabel: str, stem: str) -> None:
+def plot_scaling_curve(rows: list[dict[str, str]], output_dir: Path, value_key: str, title: str, ylabel: str, stem: str) -> bool:
     groups: dict[str, list[tuple[int, float]]] = {}
     for row in rows:
         value = parse_float(row.get(value_key))
@@ -74,7 +75,7 @@ def plot_scaling_curve(rows: list[dict[str, str]], output_dir: Path, value_key: 
         groups.setdefault(label, []).append((int(row["threads"]), value))
 
     if not groups:
-        return
+        return False
 
     fig, ax = plt.subplots(figsize=(8, 5))
     for label in sorted(groups):
@@ -86,9 +87,10 @@ def plot_scaling_curve(rows: list[dict[str, str]], output_dir: Path, value_key: 
     ax.grid(alpha=0.3)
     ax.legend()
     save_figure(fig, output_dir, stem)
+    return True
 
 
-def plot_anytime_curves(rows: list[dict[str, str]], output_dir: Path, metric_key: str, title: str, ylabel: str, stem: str) -> None:
+def plot_anytime_curves(rows: list[dict[str, str]], output_dir: Path, metric_key: str, title: str, ylabel: str, stem: str) -> bool:
     groups: dict[str, list[tuple[float, float]]] = {}
     for row in rows:
         value = parse_float(row.get(metric_key))
@@ -98,7 +100,7 @@ def plot_anytime_curves(rows: list[dict[str, str]], output_dir: Path, metric_key
         groups.setdefault(label, []).append((parse_float(row["time_sec"]), value))
 
     if not groups:
-        return
+        return False
 
     fig, ax = plt.subplots(figsize=(9, 5))
     for label in sorted(groups):
@@ -110,9 +112,10 @@ def plot_anytime_curves(rows: list[dict[str, str]], output_dir: Path, metric_key
     ax.grid(alpha=0.3)
     ax.legend(fontsize=8)
     save_figure(fig, output_dir, stem)
+    return True
 
 
-def plot_memory_bar(all_runs: list[dict[str, str]], output_dir: Path) -> None:
+def plot_memory_bar(all_runs: list[dict[str, str]], output_dir: Path) -> bool:
     groups: dict[str, list[float]] = {}
     for row in all_runs:
         if row["status"] in {"crash", "build_error", "skipped"}:
@@ -122,7 +125,7 @@ def plot_memory_bar(all_runs: list[dict[str, str]], output_dir: Path) -> None:
 
     labels = sorted(groups)
     if not labels:
-        return
+        return False
 
     medians = [float(np.median(groups[label])) for label in labels]
     fig, ax = plt.subplots(figsize=(9, 5))
@@ -133,6 +136,7 @@ def plot_memory_bar(all_runs: list[dict[str, str]], output_dir: Path) -> None:
     ax.grid(axis="y", alpha=0.3)
     ax.tick_params(axis="x", rotation=20)
     save_figure(fig, output_dir, "memory_bar")
+    return True
 
 
 def main() -> int:
@@ -144,12 +148,16 @@ def main() -> int:
     scaling_rows = read_csv_rows(input_dir / "scaling_summary.csv")
     trace_curve_rows = read_csv_rows(input_dir / "trace_curve_points.csv")
 
-    plot_runtime_boxplot(all_runs, figures_dir)
-    plot_scaling_curve(scaling_rows, figures_dir, "speedup", "Speedup Curve", "Speedup S(p)", "speedup_curve")
-    plot_scaling_curve(scaling_rows, figures_dir, "efficiency", "Efficiency Curve", "Efficiency eta(p)", "efficiency_curve")
-    plot_anytime_curves(trace_curve_rows, figures_dir, "median_hv_ratio", "Anytime HV Ratio vs Time", "Median HV Ratio", "anytime_hv_ratio")
-    plot_anytime_curves(trace_curve_rows, figures_dir, "median_recall", "Recall vs Time", "Median Recall", "recall_curve")
-    plot_memory_bar(all_runs, figures_dir)
+    generated_count = 0
+    generated_count += int(plot_runtime_boxplot(all_runs, figures_dir))
+    generated_count += int(plot_scaling_curve(scaling_rows, figures_dir, "speedup", "Speedup Curve", "Speedup S(p)", "speedup_curve"))
+    generated_count += int(plot_scaling_curve(scaling_rows, figures_dir, "efficiency", "Efficiency Curve", "Efficiency eta(p)", "efficiency_curve"))
+    generated_count += int(plot_anytime_curves(trace_curve_rows, figures_dir, "median_hv_ratio", "Anytime HV Ratio vs Time", "Median HV Ratio", "anytime_hv_ratio"))
+    generated_count += int(plot_anytime_curves(trace_curve_rows, figures_dir, "median_recall", "Recall vs Time", "Median Recall", "recall_curve"))
+    generated_count += int(plot_memory_bar(all_runs, figures_dir))
+
+    if generated_count == 0:
+        raise SystemExit("No figures were generated. Check that aggregate CSV inputs exist and contain data.")
 
     print(f"Figure output: {figures_dir}")
     return 0

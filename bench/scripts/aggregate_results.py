@@ -498,7 +498,7 @@ def main() -> int:
     args = parse_args()
     repo_root = Path.cwd()
     results_root = (repo_root / args.results_root).resolve()
-    analysis_id = args.analysis_id or f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_phase7_analysis"
+    analysis_id = args.analysis_id or f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_benchmark_analysis"
     output_dir = (repo_root / args.output_dir).resolve() if args.output_dir else (results_root / "figures" / sanitize_component(analysis_id))
     output_dir.mkdir(parents=True, exist_ok=True)
 

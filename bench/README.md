@@ -221,10 +221,10 @@ python3 bench/scripts/aggregate_results.py \
   --suite demo_completion \
   --suite demo_timecap \
   --suite demo_scaling \
-  --analysis-id demo_phase7
+  --analysis-id demo_analysis
 
 python3 bench/scripts/plot_results.py \
-  --input-dir bench/results/figures/demo_phase7
+  --input-dir bench/results/figures/demo_analysis
 ```
 
 ## Aggregate Semantics
