@@ -208,14 +208,14 @@ void single_run(
         runtime = metrics.runtime_sec;
 
         const std::string summary_output = vm["summary-output"].as<string>();
+        if (!summary_output.empty()) {
+            solver->benchmark_recorder().write_summary_row(summary_output);
+        }
         if (!metrics.frontier_artifact_path.empty()) {
             solver->benchmark_recorder().write_frontier_csv(metrics.frontier_artifact_path);
         }
         if (!metrics.trace_artifact_path.empty()) {
             solver->benchmark_recorder().write_trace_csv(metrics.trace_artifact_path);
-        }
-        if (!summary_output.empty()) {
-            solver->benchmark_recorder().write_summary_row(summary_output);
         }
     }
 

@@ -572,6 +572,10 @@ def load_solver_summary_rows(summary_path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def has_complete_solver_summary(solver_rows: list[dict[str, str]], expected_rows: int) -> bool:
+    return expected_rows > 0 and len(solver_rows) == expected_rows
+
+
 def logical_query_id_from_row(spec: RunSpec, row_query_id: str) -> str:
     prefix = spec.run_id + "__"
     if row_query_id.startswith(prefix):
@@ -957,16 +961,19 @@ def execute_run(spec: RunSpec, repo_root: Path, config: dict[str, Any]) -> tuple
 
         attempt_status = "completed"
         if process_result["timed_out"]:
-            attempt_status = "timeout"
-            suite_rows = synthetic_summary_rows(
-                spec=spec,
-                status="timeout",
-                exit_code=int(process_result["returncode"]),
-                runtime_sec=float(process_result["wall_runtime_sec"]),
-                peak_rss_mb=float(process_result["peak_rss_mb"]),
-                stdout_path=stdout_path,
-                stderr_path=stderr_path,
-            )
+            if has_complete_solver_summary(solver_rows, expected_rows):
+                attempt_status = suite_rows[0]["status"] if any(row["status"] in {"timeout", "crash"} for row in suite_rows) else "completed"
+            else:
+                attempt_status = "timeout"
+                suite_rows = synthetic_summary_rows(
+                    spec=spec,
+                    status="timeout",
+                    exit_code=int(process_result["returncode"]),
+                    runtime_sec=float(process_result["wall_runtime_sec"]),
+                    peak_rss_mb=float(process_result["peak_rss_mb"]),
+                    stdout_path=stdout_path,
+                    stderr_path=stderr_path,
+                )
         elif int(process_result["returncode"]) != 0:
             attempt_status = "crash"
             suite_rows = synthetic_summary_rows(
@@ -1001,6 +1008,8 @@ def execute_run(spec: RunSpec, repo_root: Path, config: dict[str, Any]) -> tuple
                 "peak_rss_mb": float(process_result["peak_rss_mb"]),
                 "wall_runtime_sec": float(process_result["wall_runtime_sec"]),
                 "status": attempt_status,
+                "process_timed_out": bool(process_result["timed_out"]),
+                "used_solver_summary": has_complete_solver_summary(solver_rows, expected_rows),
             }
         )
 

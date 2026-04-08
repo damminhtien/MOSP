@@ -277,6 +277,7 @@ void BenchmarkRecorder::configure(const RunMetrics& template_metadata, uint64_t 
     configured_ = true;
     finalized_ = false;
     status_set_ = false;
+    anytime_quality_metrics_ready_ = false;
 }
 
 ThreadLocalSink BenchmarkRecorder::make_thread_local_sink() const {
@@ -487,6 +488,14 @@ void BenchmarkRecorder::annotate_anytime_quality_metrics() {
     }
 }
 
+void BenchmarkRecorder::ensure_anytime_quality_metrics() {
+    if (anytime_quality_metrics_ready_) {
+        return;
+    }
+    annotate_anytime_quality_metrics();
+    anytime_quality_metrics_ready_ = true;
+}
+
 RunMetrics BenchmarkRecorder::finalize(const std::vector<FrontierPoint>& final_frontier) {
     if (!configured_) {
         return metrics_;
@@ -497,7 +506,6 @@ RunMetrics BenchmarkRecorder::finalize(const std::vector<FrontierPoint>& final_f
         metrics_.runtime_sec = BenchmarkClock::seconds_since(start_time_);
         metrics_.final_frontier = sort_frontier_lexicographically(normalize_frontier(final_frontier));
         metrics_.counters.final_frontier_size = metrics_.final_frontier.size();
-        annotate_anytime_quality_metrics();
         finalized_ = true;
     }
 
@@ -590,7 +598,8 @@ void BenchmarkRecorder::write_frontier_csv(const std::filesystem::path& csv_path
     }
 }
 
-void BenchmarkRecorder::write_trace_csv(const std::filesystem::path& csv_path) const {
+void BenchmarkRecorder::write_trace_csv(const std::filesystem::path& csv_path) {
+    ensure_anytime_quality_metrics();
     ensure_parent_directory(csv_path);
 
     std::ofstream output(csv_path, std::fstream::trunc);

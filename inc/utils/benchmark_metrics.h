@@ -159,10 +159,11 @@ public:
 
     void write_summary_row(const std::filesystem::path& csv_path) const;
     void write_frontier_csv(const std::filesystem::path& csv_path) const;
-    void write_trace_csv(const std::filesystem::path& csv_path) const;
+    void write_trace_csv(const std::filesystem::path& csv_path);
 
 private:
     void annotate_anytime_quality_metrics();
+    void ensure_anytime_quality_metrics();
     CounterSet current_counters_snapshot() const;
     bool should_record_trace(const std::vector<FrontierPoint>& frontier, double elapsed_sec) const;
     void write_summary_header(std::ofstream& output) const;
@@ -178,6 +179,7 @@ private:
     bool configured_ = false;
     bool finalized_ = false;
     bool status_set_ = false;
+    bool anytime_quality_metrics_ready_ = false;
 };
 
 std::string run_status_to_string(RunStatus status);
