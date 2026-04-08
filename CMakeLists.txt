@@ -56,4 +56,16 @@ if(BUILD_TESTING)
         target_link_libraries(benchmark_metrics_smoke PRIVATE OpenMP::OpenMP_CXX)
     endif()
     add_test(NAME benchmark_metrics_smoke COMMAND benchmark_metrics_smoke)
+
+    add_executable(
+        correctness_harness
+        tests/correctness_harness.cpp
+        ${SOURCES}
+    )
+    target_include_directories(correctness_harness PRIVATE inc)
+    target_link_libraries(correctness_harness PRIVATE ${Boost_LIBRARIES} TBB::tbb)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(correctness_harness PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+    add_test(NAME correctness_harness COMMAND correctness_harness)
 endif()
