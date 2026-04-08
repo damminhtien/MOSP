@@ -22,6 +22,161 @@ using namespace std;
 
 namespace {
 
+[[noreturn]] void fail_cli(const string& message) {
+    throw std::runtime_error("CLI error: " + message);
+}
+
+bool option_was_explicit(const po::variables_map& vm, const char* option_name) {
+    auto it = vm.find(option_name);
+    return it != vm.end() && !it->second.defaulted();
+}
+
+bool is_supported_algorithm(const string& algorithm) {
+    static const std::array<std::string_view, 9> supported = {
+        "SOPMOA",
+        "SOPMOA_relaxed",
+        "SOPMOA_bucket",
+        "LTMOA",
+        "LazyLTMOA",
+        "LTMOA_array",
+        "LazyLTMOA_array",
+        "EMOA",
+        "NWMOA",
+    };
+
+    return std::find(supported.begin(), supported.end(), algorithm) != supported.end();
+}
+
+size_t validated_node_id(const char* option_name, int raw_value, size_t num_node) {
+    if (raw_value < 0) {
+        fail_cli(string("--") + option_name + " must be >= 0");
+    }
+
+    const size_t value = static_cast<size_t>(raw_value);
+    if (value >= num_node) {
+        fail_cli(
+            string("--") + option_name + " out of range for graph with "
+            + to_string(num_node) + " nodes"
+        );
+    }
+
+    return value;
+}
+
+int validate_requested_threads(const po::variables_map& vm, const string& algorithm) {
+    const int requested_threads = vm["numthreads"].as<int>();
+    if (!option_was_explicit(vm, "numthreads") || requested_threads == -1) {
+        return requested_threads;
+    }
+
+    if (requested_threads <= 0) {
+        fail_cli("--numthreads must be positive when explicitly provided");
+    }
+
+    if (algorithm == "SOPMOA") {
+        if (requested_threads > 12) {
+            fail_cli("SOPMOA supports at most 12 threads");
+        }
+        return requested_threads;
+    }
+
+    if (algorithm == "SOPMOA_bucket") {
+        if (requested_threads > 16) {
+            fail_cli("SOPMOA_bucket supports at most 16 threads");
+        }
+        return requested_threads;
+    }
+
+    if (algorithm == "SOPMOA_relaxed") {
+        return requested_threads;
+    }
+
+    if (requested_threads != 1) {
+        fail_cli("--numthreads is only valid as 1 for serial solvers");
+    }
+
+    return requested_threads;
+}
+
+uint64_t validate_trace_interval_ms(const po::variables_map& vm) {
+    const long long trace_interval_ms = vm["trace-interval-ms"].as<long long>();
+    if (trace_interval_ms < 0) {
+        fail_cli("--trace-interval-ms must be >= 0");
+    }
+    return static_cast<uint64_t>(trace_interval_ms);
+}
+
+double validate_budget_sec(const po::variables_map& vm) {
+    const double budget_sec = vm["budget-sec"].as<double>();
+    if (!std::isfinite(budget_sec) || budget_sec < 0.0) {
+        fail_cli("--budget-sec must be finite and >= 0");
+    }
+    return budget_sec;
+}
+
+void ensure_directory_path(const string& path_string, const char* option_name) {
+    if (path_string.empty()) {
+        return;
+    }
+
+    const std::filesystem::path path(path_string);
+    std::error_code ec;
+    const bool exists = std::filesystem::exists(path, ec);
+    if (ec) {
+        fail_cli(string("cannot access ") + option_name + ": " + ec.message());
+    }
+
+    if (exists) {
+        const bool is_directory = std::filesystem::is_directory(path, ec);
+        if (ec) {
+            fail_cli(string("cannot inspect ") + option_name + ": " + ec.message());
+        }
+        if (!is_directory) {
+            fail_cli(string(option_name) + " must point to a directory");
+        }
+        return;
+    }
+
+    std::filesystem::create_directories(path, ec);
+    if (ec) {
+        fail_cli(string("cannot create ") + option_name + ": " + ec.message());
+    }
+}
+
+void ensure_parent_directory_for_file(const string& file_path_string, const char* option_name) {
+    if (file_path_string.empty()) {
+        return;
+    }
+
+    const std::filesystem::path parent = std::filesystem::path(file_path_string).parent_path();
+    if (!parent.empty()) {
+        ensure_directory_path(parent.string(), option_name);
+    }
+}
+
+void validate_map_file_count(const vector<string>& cost_files) {
+    if (cost_files.size() < 2 || cost_files.size() > Edge::MAX_NUM_OBJ) {
+        fail_cli("--map requires between 2 and 5 objective files");
+    }
+}
+
+void validate_mode_specific_arguments(const po::variables_map& vm, bool scenario_mode) {
+    if (scenario_mode) {
+        if (option_was_explicit(vm, "start") || option_was_explicit(vm, "target")) {
+            fail_cli("--scenario cannot be combined with --start or --target");
+        }
+        return;
+    }
+
+    if (option_was_explicit(vm, "from") || option_was_explicit(vm, "to")) {
+        fail_cli("--from and --to require --scenario");
+    }
+
+    if (!option_was_explicit(vm, "start") || !option_was_explicit(vm, "target")) {
+        fail_cli("single-query mode requires both --start and --target");
+    }
+}
+
 string build_default_dataset_id(const vector<string>& cost_files) {
     if (cost_files.empty()) {
         return "dataset";
@@ -104,19 +259,18 @@ void single_run(
     const string& dataset_id,
     const string& query_id,
     double budget_sec,
+    int requested_threads,
+    uint64_t trace_interval_ms,
     po::variables_map& vm
 ) {
     std::shared_ptr<AbstractSolver> solver;
 
     if (algorithm == "SOPMOA") {
-        int num_threads = vm["numthreads"].as<int>();
-        solver = get_SOPMOA_solver(graph, inv_graph, start_node, target_node, num_threads);
+        solver = get_SOPMOA_solver(graph, inv_graph, start_node, target_node, requested_threads);
     } else if (algorithm == "SOPMOA_relaxed") {
-        int num_threads = vm["numthreads"].as<int>();
-        solver = get_SOPMOA_relaxed_solver(graph, inv_graph, start_node, target_node, num_threads);
+        solver = get_SOPMOA_relaxed_solver(graph, inv_graph, start_node, target_node, requested_threads);
     } else if (algorithm == "SOPMOA_bucket") {
-        int num_threads = vm["numthreads"].as<int>();
-        solver = get_SOPMOA_bucket_solver(graph, inv_graph, start_node, target_node, num_threads);
+        solver = get_SOPMOA_bucket_solver(graph, inv_graph, start_node, target_node, requested_threads);
     } else if (algorithm == "LTMOA") {
         solver = get_LTMOA_solver(graph, inv_graph, start_node, target_node);
     } else if (algorithm == "LazyLTMOA") {
@@ -130,7 +284,14 @@ void single_run(
     } else if (algorithm == "NWMOA") {
         solver = get_NWMOA_solver(graph, inv_graph, start_node, target_node);
     } else {
-        exit(-1);
+        fail_cli("unknown algorithm: " + algorithm);
+    }
+
+    if (solver == nullptr) {
+        fail_cli(
+            "solver " + algorithm + " does not support objective count "
+            + to_string(graph.get_num_obj())
+        );
     }
 
     const bool use_canonical_output = canonical_output_enabled(vm);
@@ -148,10 +309,10 @@ void single_run(
         BenchmarkRunConfig config;
         config.dataset_id = dataset_id;
         config.query_id = query_id;
-        config.threads_requested = vm["numthreads"].as<int>();
+        config.threads_requested = requested_threads;
         config.threads_effective = effective_threads_for_algorithm(algorithm, config.threads_requested);
         config.budget_sec = budget_sec;
-        config.trace_interval_ms = vm["trace-interval-ms"].as<uint64_t>();
+        config.trace_interval_ms = trace_interval_ms;
         config.seed = vm["seed"].as<string>();
         solver->configure_benchmark_run(config);
 
@@ -240,17 +401,42 @@ void scenarios_run(
     const std::string& algorithm,
     const std::string& dataset_id,
     double budget_sec,
+    int requested_threads,
+    uint64_t trace_interval_ms,
     po::variables_map& vm
 ) {
     auto scenarios = read_scenario_file(scen_path);
 
-    int from_query = vm["from"].as<int>(); 
-    int to_query = std::min(int(scenarios.size()), vm["to"].as<int>());
+    const int from_query = vm["from"].as<int>();
+    const int raw_to_query = vm["to"].as<int>();
+    const int to_query = option_was_explicit(vm, "to") ? raw_to_query : static_cast<int>(scenarios.size());
+
+    if (from_query < 0) {
+        fail_cli("--from must be >= 0");
+    }
+    if (to_query < 0) {
+        fail_cli("--to must be >= 0");
+    }
+    if (from_query > to_query) {
+        fail_cli("--from must be <= --to");
+    }
+    if (to_query > static_cast<int>(scenarios.size())) {
+        fail_cli("--to exceeds scenario count");
+    }
+    if (from_query >= static_cast<int>(scenarios.size())) {
+        fail_cli("--from exceeds scenario count");
+    }
 
     for (int i = from_query; i < to_query; i++){
         const std::string& scenario_name = std::get<0>(scenarios[i]);
         size_t start = std::get<1>(scenarios[i]);
         size_t target = std::get<2>(scenarios[i]);
+
+        if (start >= static_cast<size_t>(graph.get_num_node()) || target >= static_cast<size_t>(graph.get_num_node())) {
+            fail_cli(
+                "scenario " + scenario_name + " has node ids outside graph bounds"
+            );
+        }
 
         std::cout << "Scenario " << i << "/" << scenarios.size() << ": ";
         std::cout << "start "<< start << " - target "<< target << std::endl;
@@ -262,6 +448,8 @@ void scenarios_run(
             dataset_id,
             resolve_query_id(vm, scenario_name, true),
             budget_sec,
+            requested_threads,
+            trace_interval_ms,
             vm
         );
     }
@@ -286,75 +474,99 @@ int main(int argc, char* argv[]) {
         ("trace-output-dir", po::value<std::string>()->default_value(""), "directory for anytime trace CSV artifacts")
         ("dataset-id", po::value<std::string>()->default_value(""), "optional dataset identifier for benchmark artifacts")
         ("query-id", po::value<std::string>()->default_value(""), "optional query identifier override")
-        ("trace-interval-ms", po::value<uint64_t>()->default_value(0), "trace sampling interval in milliseconds; 0 logs only on frontier changes")
+        ("trace-interval-ms", po::value<long long>()->default_value(0), "trace sampling interval in milliseconds; 0 logs only on frontier changes")
         ("seed", po::value<std::string>()->default_value(""), "optional seed metadata for benchmark artifacts")
         ("numthreads,n", po::value<int>()->default_value(-1), "number of threads for SOPMOA, SOPMOA_relaxed and SOPMOA_bucket");
     
     po::variables_map vm;
-    po::store(po::parse_command_line(argc, argv, desc), vm);
+    try {
+        po::store(po::parse_command_line(argc, argv, desc), vm);
 
-    if (vm.count("help")) {
-        std::cout << desc << std::endl;
-        return 1;
+        if (vm.count("help")) {
+            std::cout << desc << std::endl;
+            return 0;
+        }
+
+        po::notify(vm);
+
+        const string algorithm = vm["algorithm"].as<std::string>();
+        if (!is_supported_algorithm(algorithm)) {
+            fail_cli("unknown algorithm: " + algorithm);
+        }
+
+        validate_map_file_count(cost_files);
+
+        const bool scenario_mode = !vm["scenario"].as<std::string>().empty();
+        validate_mode_specific_arguments(vm, scenario_mode);
+
+        const int requested_threads = validate_requested_threads(vm, algorithm);
+        const uint64_t trace_interval_ms = validate_trace_interval_ms(vm);
+        const double budget_sec = validate_budget_sec(vm);
+
+        if (
+            vm["summary-output"].as<std::string>().empty()
+            && vm["frontier-output-dir"].as<std::string>().empty()
+            && vm["trace-output-dir"].as<std::string>().empty()
+        ) {
+            fail_cli("expected at least one output target: --summary-output, --frontier-output-dir, or --trace-output-dir");
+        }
+
+        ensure_parent_directory_for_file(vm["summary-output"].as<std::string>(), "--summary-output");
+        ensure_directory_path(vm["frontier-output-dir"].as<std::string>(), "--frontier-output-dir");
+        ensure_directory_path(vm["trace-output-dir"].as<std::string>(), "--trace-output-dir");
+
+        size_t num_node = 0;
+        size_t num_obj = 0;
+        std::vector<Edge> edges;
+
+        for (const auto& file_path : cost_files){
+            std::cout << file_path << std::endl;
+        }
+
+        read_graph_files(cost_files, num_node, num_obj, edges);
+        if (num_obj < 2 || num_obj > Edge::MAX_NUM_OBJ) {
+            fail_cli("solver objective count must be between 2 and 5");
+        }
+
+        std::cout << "Num node: " << num_node << std::endl;
+
+        AdjacencyMatrix graph(num_node, num_obj, edges);
+        AdjacencyMatrix inv_graph(num_node, num_obj, edges, true);
+
+        const std::string dataset_id = vm["dataset-id"].as<std::string>().empty()
+            ? build_default_dataset_id(cost_files)
+            : sanitize_artifact_component(vm["dataset-id"].as<std::string>());
+
+        if (scenario_mode) {
+            scenarios_run(
+                graph, inv_graph,
+                vm["scenario"].as<std::string>(),
+                algorithm,
+                dataset_id,
+                budget_sec,
+                requested_threads,
+                trace_interval_ms,
+                vm
+            );
+        } else {
+            const size_t start_node = validated_node_id("start", vm["start"].as<int>(), num_node);
+            const size_t target_node = validated_node_id("target", vm["target"].as<int>(), num_node);
+            single_run(
+                graph, inv_graph,
+                start_node, target_node,
+                algorithm,
+                dataset_id,
+                resolve_query_id(vm, build_single_query_id(start_node, target_node), false),
+                budget_sec,
+                requested_threads,
+                trace_interval_ms,
+                vm
+            );
+        }
+
+        return 0;
+    } catch (const std::exception& ex) {
+        std::cerr << ex.what() << std::endl;
+        return EXIT_FAILURE;
     }
-
-    po::notify(vm);
-
-    const double budget_sec = vm["budget-sec"].as<double>();
-
-    size_t num_node;
-    size_t num_obj;
-    std::vector<Edge> edges;
-
-    for (auto file_path : cost_files){
-        std::cout << file_path << std::endl;
-    }
-
-    read_graph_files(cost_files, num_node, num_obj, edges);
-    std::cout << "Num node: " << num_node << std::endl;
-
-    AdjacencyMatrix graph(num_node, num_obj, edges);
-    AdjacencyMatrix inv_graph(num_node, num_obj, edges, true);
-
-    const std::string dataset_id = vm["dataset-id"].as<std::string>().empty()
-        ? build_default_dataset_id(cost_files)
-        : sanitize_artifact_component(vm["dataset-id"].as<std::string>());
-
-    if (
-        vm["summary-output"].as<std::string>().empty()
-        && vm["frontier-output-dir"].as<std::string>().empty()
-        && vm["trace-output-dir"].as<std::string>().empty()
-    ) {
-        std::cerr << "Expected at least one output target: --summary-output, --frontier-output-dir, or --trace-output-dir" << std::endl;
-        return 1;
-    }
-
-    if (vm["frontier-output-dir"].as<std::string>() != "") {
-        std::filesystem::create_directories(vm["frontier-output-dir"].as<std::string>());
-    }
-    if (vm["trace-output-dir"].as<std::string>() != "") {
-        std::filesystem::create_directories(vm["trace-output-dir"].as<std::string>());
-    }
-
-    if (vm["scenario"].as<std::string>() != ""){
-        scenarios_run(
-            graph, inv_graph, 
-            vm["scenario"].as<std::string>(), 
-            vm["algorithm"].as<std::string>(),
-            dataset_id,
-            budget_sec,
-            vm
-        );
-    } else {
-        single_run(
-            graph, inv_graph, 
-            vm["start"].as<int>(), vm["target"].as<int>(), 
-            vm["algorithm"].as<std::string>(),
-            dataset_id,
-            resolve_query_id(vm, build_single_query_id(vm["start"].as<int>(), vm["target"].as<int>()), false),
-            budget_sec,
-            vm
-        );
-    }
-    return 0;
 }

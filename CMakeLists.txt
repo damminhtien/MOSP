@@ -46,6 +46,13 @@ target_link_libraries(main PUBLIC TBB::tbb)
 
 if(BUILD_TESTING)
     add_executable(
+        linkedlist_smoke
+        tests/linkedlist_smoke.cpp
+    )
+    target_include_directories(linkedlist_smoke PRIVATE inc)
+    add_test(NAME linkedlist_smoke COMMAND linkedlist_smoke)
+
+    add_executable(
         pq_bucket_smoke
         tests/pq_bucket_smoke.cpp
     )
@@ -75,4 +82,10 @@ if(BUILD_TESTING)
         target_link_libraries(correctness_harness PRIVATE OpenMP::OpenMP_CXX)
     endif()
     add_test(NAME correctness_harness COMMAND correctness_harness)
+
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(
+        NAME cli_validation_smoke
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/cli_validation_smoke.py $<TARGET_FILE:main>
+    )
 endif()
