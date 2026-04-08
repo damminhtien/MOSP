@@ -303,6 +303,35 @@ void run_gcl_snapshot_subcase(GclType& gcl) {
     assert(frontier[1].time_found_sec == 0.6);
 }
 
+void run_gcl_nwmoa_ordering_subcase() {
+    Gcl_NWMOA<2> gcl(4);
+
+    CostVec<2> mid{};
+    mid[0] = 6;
+    mid[1] = 6;
+
+    CostVec<2> low{};
+    low[0] = 2;
+    low[1] = 8;
+
+    CostVec<2> high{};
+    high[0] = 8;
+    high[1] = 2;
+
+    assert(gcl.frontier_update(1, mid, 0.5));
+    assert(gcl.frontier_update(1, high, 0.6));
+    assert(gcl.frontier_update(1, low, 0.4));
+
+    auto snapshot = gcl.snapshot(1);
+    assert(snapshot.size() == 3);
+    assert(snapshot[0].cost == low);
+    assert(snapshot[1].cost == mid);
+    assert(snapshot[2].cost == high);
+    assert(gcl.frontier_check(1, low));
+    assert(gcl.frontier_check(1, mid));
+    assert(gcl.frontier_check(1, high));
+}
+
 void run_gcl_matrix_subcase() {
     Gcl<2> list_gcl(4);
     Gcl_array<2> array_gcl(4);
@@ -313,6 +342,7 @@ void run_gcl_matrix_subcase() {
     run_gcl_snapshot_subcase(array_gcl);
     run_gcl_snapshot_subcase(tree_gcl);
     run_gcl_snapshot_subcase(nwmoa_gcl);
+    run_gcl_nwmoa_ordering_subcase();
 }
 
 void run_solver_subcase(
