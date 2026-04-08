@@ -1,168 +1,157 @@
-
 #ifndef UTILS_LINKEDLIST
 #define UTILS_LINKEDLIST
 
-// linkedlist.h
-//
-// A linked list structure
-//
-// @author: sahmadi
-// @updated: 06/06/21
-//
-#include <cstring>
-#include <stdint.h>
+#include <cassert>
+#include <type_traits>
 
-#include"../common_inc.h"
+#include "../common_inc.h"
 
 template <class T>
-class linkedlist
-{
+class linkedlist {
+    static_assert(std::is_pointer<T>::value, "linkedlist expects a pointer element type");
+
 public:
-	linkedlist(T element = 0) : head_(element), tail_(element) {
-		element ? size_ = 1 : size_ = 0;
-	}
+    linkedlist() = default;
 
-	// ~linkedlist()
-	// { }
-
-	inline void
-	push_front(T element) {
-		element->set_next(head_);
-		head_ = element;
-		size_++;
-	}
-	
-	inline void
-	push_back(T element)
-	{
-		(element)->set_next(0);
-		if (!head_)
-		{
-			head_ = element;
-			tail_ = element;
-			// tail_prev_ = 0;
-		}
-		else
-		{
-			// tail_prev_ = tail_;
-			(tail_)->set_next(element);
-			tail_ = element;
-		}
-		size_++;
-	}
-
-	inline void
-	set_head(T element)
-	{
-		head_ = element;
-	}
-
-	inline void
-	set_tail(T element)
-	{
-		tail_ = element;
-	}
-
-	inline void
-	set_prev_back(T element)
-	{
-		tail_prev_ = element;
-	}
-
-	inline void
-	set_size(unsigned int size)
-	{
-		size_ = size;
-	}
-
-	inline T
-	front()
-	{
-		return head_;
-	}
-
-	inline T
-	back()
-	{
-		return tail_;
-	}
-
-	inline T
-	prev_back()
-	{
-		return tail_prev_;
-	}
-
-	inline unsigned int
-	size()
-	{
-		return size_;
-	}
-
-	inline void
-	pop_front()
-	{
-		// we never pop from empty list!
-		// if(head_)
-		// {
-			// if (size_ <= 1)
-			// {
-			// 	clear();
-			// }
-			// else
-			{
-        head_ = (T) head_->get_next();
-            size_--;
+    explicit linkedlist(T element) {
+        if (element != nullptr) {
+            head_ = element;
+            tail_ = element;
+            size_ = 1;
         }
-			
-		// }
-	}
+    }
 
-	// THIS must be followed by a push_back()
-	// Otherwise, tail_prev_ does not change.
-	inline void
-	pop_back()
-	{
-		// we never pop from empty list!
-		// if (size_ <= 1)
-		// {
-		// 	clear();
-		// }
-		// else
-		{
-			tail_ = tail_prev_;
-			size_--;
-		}
-	}
+    linkedlist(const linkedlist&) = delete;
+    linkedlist& operator=(const linkedlist&) = delete;
+    linkedlist(linkedlist&&) noexcept = default;
+    linkedlist& operator=(linkedlist&&) noexcept = default;
+    ~linkedlist() = default;
 
-	inline void
-	clear()
-	{
-		head_ = 0;
-		tail_ = 0;
-		size_ = 0;
-		tail_prev_ = 0;
-	}
+    void push_front(T element) {
+        assert(element != nullptr);
 
-	size_t
-	mem() { return sizeof(T) * size_ * 2; }
+        if (empty()) {
+            element->set_next(nullptr);
+            head_ = element;
+            tail_ = element;
+            tail_prev_ = nullptr;
+            size_ = 1;
+            return;
+        }
 
-	linkedlist<T> &
-	operator=(linkedlist<T> &other)
-	{
-		this->head_ = other.head_;
-		this->tail_ = other.tail_;
-		this->tail_prev_ = other.tail_prev_;
-		this->size_ = other.size_;
-		// other.size_ = 0;
-		return *this;
-	}
+        element->set_next(head_);
+        head_ = element;
+        if (size_ == 1) {
+            tail_prev_ = element;
+        }
+        size_++;
+    }
+
+    void push_back(T element) {
+        assert(element != nullptr);
+        element->set_next(nullptr);
+
+        if (empty()) {
+            head_ = element;
+            tail_ = element;
+            tail_prev_ = nullptr;
+            size_ = 1;
+            return;
+        }
+
+        tail_prev_ = tail_;
+        tail_->set_next(element);
+        tail_ = element;
+        size_++;
+    }
+
+    T front() const {
+        return head_;
+    }
+
+    T back() const {
+        return tail_;
+    }
+
+    T prev_back() const {
+        return tail_prev_;
+    }
+
+    size_t size() const {
+        return size_;
+    }
+
+    bool empty() const {
+        return size_ == 0;
+    }
+
+    void pop_front() {
+        assert(!empty());
+
+        if (size_ == 1) {
+            clear();
+            return;
+        }
+
+        head_ = static_cast<T>(head_->get_next());
+        size_--;
+        if (size_ == 1) {
+            tail_ = head_;
+            tail_prev_ = nullptr;
+        }
+    }
+
+    void pop_back() {
+        assert(!empty());
+
+        if (size_ == 1) {
+            clear();
+            return;
+        }
+
+        T previous = nullptr;
+        T current = head_;
+        while (current != nullptr && current != tail_) {
+            previous = current;
+            current = static_cast<T>(current->get_next());
+        }
+
+        assert(current == tail_);
+
+        tail_ = previous;
+        if (tail_ != nullptr) {
+            tail_->set_next(nullptr);
+        }
+
+        if (size_ == 2) {
+            tail_prev_ = nullptr;
+        } else {
+            T before_tail = head_;
+            while (before_tail != nullptr && static_cast<T>(before_tail->get_next()) != tail_) {
+                before_tail = static_cast<T>(before_tail->get_next());
+            }
+            tail_prev_ = before_tail;
+        }
+
+        size_--;
+    }
+
+    void clear() {
+        head_ = nullptr;
+        tail_ = nullptr;
+        tail_prev_ = nullptr;
+        size_ = 0;
+    }
+
+    size_t mem() const {
+        return sizeof(*this);
+    }
 
 private:
-	T head_= 0;
-	T tail_ = 0;
-	T tail_prev_ = 0;
-	unsigned int size_ = 0;
+    T head_ = nullptr;
+    T tail_ = nullptr;
+    T tail_prev_ = nullptr;
+    size_t size_ = 0;
 };
 
 #endif
