@@ -107,30 +107,6 @@ public:
         return metrics;
     }
 
-    std::string get_result_str(){
-        std::stringstream ss;
-        ss << get_name() << ","
-        << start_node << "," << target_node << "," 
-        << get_num_generation() << "," 
-        << get_num_expansion() << "," 
-        << solutions.size(); 
-        std::string result = ss.str();
-        return result;
-    }
-
-    std::string get_all_sols_str() {
-        std::stringstream ss;
-        for(auto sol : solutions) {
-            ss << "[" << sol.cost[0];
-            for (int i = 1; i < sol.cost.size(); i++) {
-                ss << "," << sol.cost[i];
-            }
-            ss << "]" << std::endl;
-        }
-        std::string result = ss.str();
-        return result;
-    }
-
 protected:
     virtual void sync_benchmark_recorder() {}
 

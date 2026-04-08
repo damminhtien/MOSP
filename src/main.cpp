@@ -13,10 +13,9 @@
 
 #include"utils/data_io.h"
 
-#include <boost/program_options.hpp>
-#include <boost/tokenizer.hpp>
 #include <string>
 #include <thread>
+#include <boost/program_options.hpp>
 
 namespace po = boost::program_options;
 using namespace std;
@@ -104,7 +103,6 @@ void single_run(
     const string& algorithm,
     const string& dataset_id,
     const string& query_id,
-    std::ofstream* legacy_output,
     double budget_sec,
     po::variables_map& vm
 ) {
@@ -142,7 +140,6 @@ void single_run(
         std::cerr
             << "Canonical benchmark output is not available for solver "
             << solver->get_name()
-            << ". Use --output for legacy CSV instead."
             << std::endl;
         exit(EXIT_FAILURE);
     }
@@ -232,21 +229,6 @@ void single_run(
     std::cout << "Num generation: " << solver->get_num_generation() << std::endl;
     std::cout << "Runtime: " << runtime << std::endl;
 
-    if (legacy_output != nullptr && legacy_output->is_open()) {
-        (*legacy_output) << solver->get_result_str() << "," << runtime << std::endl;
-    }
-
-    if (vm["logsols"].as<std::string>() != "") {
-        std::string log_path = vm["logsols"].as<std::string>();
-        log_path += "/" + std::to_string(start_node) + "-" + std::to_string(target_node);
-        log_path += "-" + std::to_string(graph.get_num_obj()) + "obj.txt";
-
-        std::ofstream log_file;
-        log_file.open(log_path, std::fstream::trunc);
-        log_file << solver->get_all_sols_str() << std::endl;
-        log_file.close();
-    }
-
     solver.reset();
     
 }
@@ -257,7 +239,6 @@ void scenarios_run(
     const std::string& scen_path,
     const std::string& algorithm,
     const std::string& dataset_id,
-    std::ofstream* legacy_output,
     double budget_sec,
     po::variables_map& vm
 ) {
@@ -280,7 +261,6 @@ void scenarios_run(
             algorithm,
             dataset_id,
             resolve_query_id(vm, scenario_name, true),
-            legacy_output,
             budget_sec,
             vm
         );
@@ -300,11 +280,8 @@ int main(int argc, char* argv[]) {
         ("to", po::value<int>()->default_value(INT_MAX), "up to the i-th line of the scenario file")
         ("map,m",po::value< std::vector<string> >(&cost_files)->multitoken(), "files for edge weight")
         ("algorithm,a", po::value<std::string>()->default_value("SOPMOA"), "solvers [SOPMOA, SOPMOA_relaxed, SOPMOA_bucket, LTMOA, LazyLTMOA, LTMOA_array, LazyLTMOA_array, EMOA, NWMOA]")
-        ("budget-sec", po::value<double>()->default_value(-1.0), "canonical benchmark budget in seconds")
-        ("timelimit", po::value<double>()->default_value(-1.0), "legacy cutoff time (seconds)")
-        ("logsols", po::value<std::string>()->default_value(""), "if non-empty, dump solution cost to the directory")
-        ("output,o", po::value<std::string>()->default_value(""), "legacy output CSV path")
-        ("summary-output", po::value<std::string>()->default_value(""), "canonical summary CSV path")
+        ("budget-sec", po::value<double>()->default_value(300.0), "benchmark budget in seconds")
+        ("summary-output", po::value<std::string>()->default_value(""), "summary CSV path")
         ("frontier-output-dir", po::value<std::string>()->default_value(""), "directory for final frontier CSV artifacts")
         ("trace-output-dir", po::value<std::string>()->default_value(""), "directory for anytime trace CSV artifacts")
         ("dataset-id", po::value<std::string>()->default_value(""), "optional dataset identifier for benchmark artifacts")
@@ -322,11 +299,8 @@ int main(int argc, char* argv[]) {
     }
 
     po::notify(vm);
-    srand((int)time(0));
 
-    const double budget_sec = vm["budget-sec"].as<double>() >= 0.0
-        ? vm["budget-sec"].as<double>()
-        : (vm["timelimit"].as<double>() >= 0.0 ? vm["timelimit"].as<double>() : 300.0);
+    const double budget_sec = vm["budget-sec"].as<double>();
 
     size_t num_node;
     size_t num_obj;
@@ -346,26 +320,15 @@ int main(int argc, char* argv[]) {
         ? build_default_dataset_id(cost_files)
         : sanitize_artifact_component(vm["dataset-id"].as<std::string>());
 
-    std::ofstream stats;
-    std::ofstream* legacy_output = nullptr;
-    if (!vm["output"].as<std::string>().empty()) {
-        stats.open(vm["output"].as<std::string>(), std::fstream::app);
-        legacy_output = &stats;
-    }
-
     if (
-        vm["output"].as<std::string>().empty()
-        && vm["summary-output"].as<std::string>().empty()
+        vm["summary-output"].as<std::string>().empty()
         && vm["frontier-output-dir"].as<std::string>().empty()
         && vm["trace-output-dir"].as<std::string>().empty()
     ) {
-        std::cerr << "Expected at least one output target: --summary-output, --frontier-output-dir, --trace-output-dir, or --output" << std::endl;
+        std::cerr << "Expected at least one output target: --summary-output, --frontier-output-dir, or --trace-output-dir" << std::endl;
         return 1;
     }
 
-    if (vm["logsols"].as<std::string>() != "") {
-        std::filesystem::create_directories(vm["logsols"].as<std::string>());
-    }
     if (vm["frontier-output-dir"].as<std::string>() != "") {
         std::filesystem::create_directories(vm["frontier-output-dir"].as<std::string>());
     }
@@ -379,7 +342,6 @@ int main(int argc, char* argv[]) {
             vm["scenario"].as<std::string>(), 
             vm["algorithm"].as<std::string>(),
             dataset_id,
-            legacy_output,
             budget_sec,
             vm
         );
@@ -390,12 +352,9 @@ int main(int argc, char* argv[]) {
             vm["algorithm"].as<std::string>(),
             dataset_id,
             resolve_query_id(vm, build_single_query_id(vm["start"].as<int>(), vm["target"].as<int>()), false),
-            legacy_output,
             budget_sec,
             vm
         );
     }
-    
-    stats.close();
     return 0;
 }
