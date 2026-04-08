@@ -12,7 +12,7 @@ no `--output`, no `--timelimit`, and no ad hoc solution-log export path.
 
 ## Stage Status
 
-The repository is currently aligned to seven completed stages:
+The repository is currently aligned to eight completed stages:
 
 1. Instrumentation core
    One benchmark pipeline based on summary, frontier, and trace artifacts.
@@ -31,6 +31,9 @@ The repository is currently aligned to seven completed stages:
 7. Aggregate and visualize pipeline
    Raw suites can now be reduced into paper-style tables, scaling summaries,
    anytime summaries, and deterministic figures under `bench/results/figures/`.
+8. Benchmark protocol documentation
+   Research-grade benchmark methodology, metric definitions, quickstart, and
+   reproducibility notes now live under `docs/`.
 
 ## Solver Status
 
@@ -102,6 +105,24 @@ Threading behavior:
 - `SOPMOA_bucket` caps `-n` at `16`
 - `SOPMOA_relaxed` uses the requested thread count directly
 - serial solvers run single-threaded
+
+## Benchmark Docs
+
+The repository originally only had smoke-style benchmark commands. Those are
+still kept for local validation, but they are no longer the recommended path
+for comparative or paper-facing results.
+
+Use the new benchmark documentation set:
+
+- [docs/benchmark-protocol.md](/Users/macbook/Desktop/workspace/SOPMOA/docs/benchmark-protocol.md)
+- [docs/benchmark-quickstart.md](/Users/macbook/Desktop/workspace/SOPMOA/docs/benchmark-quickstart.md)
+- [docs/metrics-definition.md](/Users/macbook/Desktop/workspace/SOPMOA/docs/metrics-definition.md)
+- [docs/reproducibility.md](/Users/macbook/Desktop/workspace/SOPMOA/docs/reproducibility.md)
+
+## Legacy Smoke Benchmark
+
+These commands are kept as quick sanity checks for local builds and artifact
+wiring. They are not the paper-grade benchmark path.
 
 ## Quick Start
 
@@ -326,6 +347,48 @@ Example successful suite output from this phase:
 
 - `bench/results/phase5_timecap_smoke/`
 - `bench/results/phase6_timecap_demo_v2/`
+
+## How To Run Paper-Grade Benchmark
+
+Run raw suites:
+
+```bash
+python3 bench/scripts/run_benchmark.py \
+  --config bench/configs/completion.yaml \
+  --suite-id paper_completion_demo
+
+python3 bench/scripts/run_benchmark.py \
+  --config bench/configs/timecap.yaml \
+  --suite-id paper_timecap_demo
+
+python3 bench/scripts/run_benchmark.py \
+  --config bench/configs/scaling.yaml \
+  --suite-id paper_scaling_demo
+```
+
+Aggregate the raw suites:
+
+```bash
+python3 bench/scripts/aggregate_results.py \
+  --suite paper_completion_demo \
+  --suite paper_timecap_demo \
+  --suite paper_scaling_demo \
+  --analysis-id paper_demo
+```
+
+Render figures:
+
+```bash
+python3 bench/scripts/plot_results.py \
+  --input-dir bench/results/figures/paper_demo
+```
+
+Primary output schemas now live in:
+
+- raw suite docs in [bench/README.md](/Users/macbook/Desktop/workspace/SOPMOA/bench/README.md)
+- benchmark protocol in [docs/benchmark-protocol.md](/Users/macbook/Desktop/workspace/SOPMOA/docs/benchmark-protocol.md)
+- metric semantics in [docs/metrics-definition.md](/Users/macbook/Desktop/workspace/SOPMOA/docs/metrics-definition.md)
+- reproducibility notes in [docs/reproducibility.md](/Users/macbook/Desktop/workspace/SOPMOA/docs/reproducibility.md)
 
 ## Aggregate And Visualize
 

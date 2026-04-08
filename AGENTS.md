@@ -19,7 +19,7 @@ The default agent posture is:
 
 ## Active Project State
 
-The repository currently reflects seven completed stages:
+The repository currently reflects eight completed stages:
 
 1. shared instrumentation core
 2. unified measurement semantics
@@ -30,6 +30,8 @@ The repository currently reflects seven completed stages:
    robust run classification
 7. aggregate and figure scripts that turn raw suites into paper-style tables,
    scaling reports, and research-grade plots
+8. benchmark protocol docs that define the recommended benchmark methodology,
+   metric semantics, quickstart, and reproducibility contract
 
 ## Primary Mission
 
@@ -117,6 +119,14 @@ For optimization, benchmarking, or parallelization work, follow this order:
   `completion`, `time_capped`, and `scaling` benchmark configs.
 - `bench/results/`
   Local benchmark suite outputs.
+- `docs/benchmark-protocol.md`
+  Research-grade benchmark methodology and claim structure.
+- `docs/benchmark-quickstart.md`
+  Minimal end-to-end benchmark workflow for new users.
+- `docs/metrics-definition.md`
+  Canonical metric semantics.
+- `docs/reproducibility.md`
+  Required metadata and artifact preservation rules.
 
 ## Benchmark Questions To Answer
 
@@ -140,6 +150,9 @@ When benchmark work is relevant, try to answer these:
 - Use the aggregate pipeline in `bench/scripts/aggregate_results.py` and
   `bench/scripts/plot_results.py` when the user asks for paper tables, speedup,
   efficiency, anytime quality, or figure-ready outputs.
+- Treat the docs under `docs/` as the benchmark methodology contract. If the
+  runner, aggregate schemas, or metric semantics change, update those docs in
+  the same pass.
 - Export machine-readable results only through the canonical summary/frontier/
   trace path.
 - Treat `bench/results/<suite_id>/environment.json` as required context for any
@@ -240,6 +253,9 @@ When project behavior changes, update the relevant docs in the same pass:
 - `run_command.txt` for reproducible commands
 - `AGENTS.md` for future agent behavior
 - `bench/README.md` when benchmark manifests, modes, or result layout change
+- `docs/benchmark-protocol.md`, `docs/benchmark-quickstart.md`,
+  `docs/metrics-definition.md`, and `docs/reproducibility.md` when benchmark
+  methodology, semantics, or reproducibility expectations change
 
 ## Known Limits
 

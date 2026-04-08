@@ -4,7 +4,8 @@ This document is the maintainer view of the current codebase after the legacy
 benchmark path was removed. It explains how execution flows, where measurement
 semantics live, how correctness is checked, how benchmark suites are
 orchestrated and recorded, and how raw suites are aggregated into paper-style
-tables and figures.
+tables and figures. The research-grade benchmark methodology itself is
+documented under `docs/`.
 
 ## Project Shape
 
@@ -54,6 +55,18 @@ manifests, query manifests, and benchmark configs into organized suites under
   result layout.
   The phase-6 primary entrypoint is `bench/scripts/run_benchmark.py`; the plural
   script is only a thin compatibility shim.
+
+## Benchmark Documentation Layer
+
+Phase 8 adds a dedicated documentation layer for benchmark methodology:
+
+- `docs/benchmark-protocol.md`
+- `docs/benchmark-quickstart.md`
+- `docs/metrics-definition.md`
+- `docs/reproducibility.md`
+
+These files define the recommended benchmark path. The older CLI examples remain
+only as legacy smoke checks.
 
 ## Shared Solver Layer
 
@@ -297,6 +310,9 @@ The repository state after the current cleanup is:
 7. Stage 7
    Aggregate scripts and deterministic figures reduce raw suites into
    paper-style summaries, scaling tables, and anytime plots.
+8. Stage 8
+   Benchmark protocol, metric semantics, quickstart, and reproducibility docs
+   define the recommended research-grade workflow.
 
 ## Known Limits
 

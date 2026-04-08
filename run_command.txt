@@ -8,6 +8,9 @@ cmake --build Release -j4
 # Show the current canonical CLI.
 ./Release/main --help
 
+# Legacy smoke benchmark path.
+# Useful for quick local validation only.
+
 # Run the config-driven benchmark harness.
 python3 bench/scripts/run_benchmark.py --config bench/configs/timecap.yaml --suite-id local_timecap
 python3 bench/scripts/run_benchmark.py --config bench/configs/completion.yaml --suite-id local_completion
@@ -23,6 +26,12 @@ python3 bench/scripts/aggregate_results.py \
 # Render deterministic figures from the aggregate output.
 python3 bench/scripts/plot_results.py \
   --input-dir bench/results/figures/local_phase7
+
+# Read the benchmark methodology docs.
+sed -n '1,200p' docs/benchmark-protocol.md
+sed -n '1,200p' docs/benchmark-quickstart.md
+sed -n '1,200p' docs/metrics-definition.md
+sed -n '1,200p' docs/reproducibility.md
 
 # Prepare output directories for canonical artifacts.
 mkdir -p output/frontiers

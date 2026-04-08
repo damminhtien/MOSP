@@ -1,5 +1,12 @@
 # Benchmark Harness
 
+The canonical benchmark methodology is documented in:
+
+- [docs/benchmark-protocol.md](/Users/macbook/Desktop/workspace/SOPMOA/docs/benchmark-protocol.md)
+- [docs/benchmark-quickstart.md](/Users/macbook/Desktop/workspace/SOPMOA/docs/benchmark-quickstart.md)
+- [docs/metrics-definition.md](/Users/macbook/Desktop/workspace/SOPMOA/docs/metrics-definition.md)
+- [docs/reproducibility.md](/Users/macbook/Desktop/workspace/SOPMOA/docs/reproducibility.md)
+
 The repository benchmark flow is now config-driven.
 
 Directory layout:
