@@ -2,7 +2,7 @@
 
 This document is the maintainer view of the current codebase after the legacy
 benchmark path was removed. It explains how execution flows, where measurement
-semantics live, and how correctness is checked.
+semantics live, how correctness is checked, and how benchmarks are orchestrated.
 
 ## Project Shape
 
@@ -33,6 +33,10 @@ For a normal run the program does the following:
 Scenario mode is just a thin loop over repeated single-query execution with
 stable dataset and query identifiers.
 
+On top of that CLI, phase 5 adds a Python benchmark runner that expands dataset
+manifests, query manifests, and benchmark configs into organized suites under
+`bench/results/`.
+
 ## Main Runtime Files
 
 - `src/main.cpp`
@@ -43,6 +47,9 @@ stable dataset and query identifiers.
   Forward and reverse graph construction.
 - `src/problem/heuristic.cpp`
   Reverse single-objective Dijkstra heuristics used by exact solvers.
+- `bench/scripts/run_benchmarks.py`
+  Config-driven benchmark orchestration, environment capture, run identity, and
+  result layout.
 
 ## Shared Solver Layer
 
@@ -175,6 +182,47 @@ It checks:
 This harness is wired into CTest and can be run through
 `scripts/run_correctness_harness.sh`.
 
+## Benchmark Harness
+
+Phase 5 introduced a manifest-driven benchmark layer under `bench/`.
+
+Key directories:
+
+- `bench/manifests/datasets/`
+- `bench/manifests/query_sets/`
+- `bench/configs/`
+- `bench/scripts/`
+- `bench/results/`
+
+The runner in `bench/scripts/run_benchmarks.py` does not replace `main`. It
+wraps `main` and standardizes:
+
+- dataset selection
+- query-set selection
+- benchmark mode selection
+- per-run identity
+- repeat handling
+- retry or fail-fast policy
+- environment capture
+- result placement
+
+Current supported modes:
+
+- `completion`
+- `time_capped`
+- `scaling`
+
+Each suite writes:
+
+- `environment.json`
+- `resolved_config.json`
+- `run_plan.json`
+- `run_results.json`
+- `runs/<run_id>/...`
+
+Each run directory contains canonical solver outputs plus runner metadata and
+captured stdout/stderr.
+
 ## Stage Map
 
 The repository state after the current cleanup is:
@@ -187,6 +235,9 @@ The repository state after the current cleanup is:
    Deterministic final-frontier export is enforced.
 4. Stage 4
    Correctness harness covers exactness and regression safety.
+5. Stage 5
+   Benchmark harness covers datasets, query sets, benchmark modes, and
+   organized result suites.
 
 ## Known Limits
 

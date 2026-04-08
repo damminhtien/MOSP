@@ -8,6 +8,11 @@ cmake --build Release -j4
 # Show the current canonical CLI.
 ./Release/main --help
 
+# Run the config-driven benchmark harness.
+python3 bench/scripts/run_benchmarks.py --config bench/configs/timecap.yaml --suite-id local_timecap
+python3 bench/scripts/run_benchmarks.py --config bench/configs/completion.yaml --suite-id local_completion
+python3 bench/scripts/run_benchmarks.py --config bench/configs/scaling.yaml --suite-id local_scaling --dry-run
+
 # Prepare output directories for canonical artifacts.
 mkdir -p output/frontiers
 mkdir -p output/traces

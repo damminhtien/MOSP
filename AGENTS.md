@@ -11,12 +11,13 @@ paths are intentionally removed. Do not reintroduce them.
 
 ## Current Stage State
 
-The repo currently reflects four completed stages:
+The repo currently reflects five completed stages:
 
 1. shared instrumentation core
 2. unified measurement semantics
 3. deterministic final-frontier export
 4. correctness harness for exactness and regression safety
+5. benchmark harness with manifests, configs, and organized result suites
 
 ## Non-Negotiable Rules
 
@@ -28,6 +29,7 @@ The repo currently reflects four completed stages:
 - `final_frontier_size` must come from the final nondominated target frontier, never raw target hits.
 - Final frontier export must remain deterministic and lex-sorted.
 - Prefer deletion over compatibility shims.
+- Keep benchmark orchestration manifest-driven under `bench/`.
 
 ## Main Code Map
 
@@ -43,6 +45,12 @@ The repo currently reflects four completed stages:
   Measurement semantics smoke tests.
 - `tests/correctness_harness.cpp`
   Synthetic exactness and determinism checks.
+- `bench/scripts/run_benchmarks.py`
+  Config-driven benchmark runner.
+- `bench/manifests/`
+  Dataset and query-set manifests.
+- `bench/configs/`
+  Completion, time-capped, and scaling benchmark configs.
 
 ## When Editing Code
 
@@ -52,6 +60,8 @@ The repo currently reflects four completed stages:
   through the shared benchmark recorder rather than inventing a parallel path.
 - Preserve deterministic artifact output.
 - Prefer modern C++ standard-library facilities over C-style patterns.
+- Keep benchmark configs and manifests simple enough for the stdlib Python
+  runner; do not add orchestration dependencies casually.
 
 ## Required Verification
 
@@ -65,6 +75,12 @@ ctest --test-dir Release --output-on-failure -R "benchmark_metrics_smoke|correct
 For CLI or artifact changes, also run at least one canonical smoke command from
 `run_command.txt`.
 
+For benchmark-runner changes, also run at least one config through:
+
+```bash
+python3 bench/scripts/run_benchmarks.py --config bench/configs/timecap.yaml --suite-id local_smoke
+```
+
 ## Documentation Contract
 
 When behavior changes, update the relevant docs in the same pass:
@@ -73,6 +89,7 @@ When behavior changes, update the relevant docs in the same pass:
 - `ARCHITECTURE.md` for maintainer-facing design
 - `run_command.txt` for reproducible local commands
 - `AGENTS.md` for future implementation guidance
+- `bench/README.md` for benchmark manifests, configs, and result layout
 
 ## Known Limits
 

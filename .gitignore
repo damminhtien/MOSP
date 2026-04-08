@@ -3,5 +3,6 @@ Debug/**
 output/**
 bench/results/*
 !bench/results/README.md
+__pycache__/
 .omx/
 .codex/

@@ -12,7 +12,7 @@ no `--output`, no `--timelimit`, and no ad hoc solution-log export path.
 
 ## Stage Status
 
-The repository is currently aligned to four completed stages:
+The repository is currently aligned to five completed stages:
 
 1. Instrumentation core
    One benchmark pipeline based on summary, frontier, and trace artifacts.
@@ -22,6 +22,9 @@ The repository is currently aligned to four completed stages:
    Final target-frontier artifacts are canonical, sorted, and stable.
 4. Correctness harness
    Synthetic exactness and regression checks are built into CTest.
+5. Benchmark harness
+   Dataset manifests, query manifests, benchmark modes, and config-driven runs
+   now live under `bench/`.
 
 ## Solver Status
 
@@ -227,6 +230,63 @@ Covered objective counts:
 
 See `tests/correctness_harness.cpp` and `data/synthetic/README.md`.
 
+## Benchmark Harness
+
+Phase 5 adds a config-driven benchmark layer.
+
+Primary command:
+
+```bash
+python3 bench/scripts/run_benchmarks.py --config bench/configs/timecap.yaml
+```
+
+Supported benchmark modes:
+
+- `completion`
+- `time_capped`
+- `scaling`
+
+Benchmark structure:
+
+- `bench/manifests/datasets/`
+- `bench/manifests/query_sets/`
+- `bench/configs/`
+- `bench/scripts/`
+- `bench/results/`
+
+Current checked-in manifests:
+
+- dataset: `bench/manifests/datasets/nyc_3obj.json`
+- query sets:
+  - `bench/manifests/query_sets/nyc_trivial_completion.json`
+  - `bench/manifests/query_sets/nyc_query6_pair.json`
+  - `bench/manifests/query_sets/nyc_query6_single.json`
+
+Current example configs:
+
+- `bench/configs/completion.yaml`
+- `bench/configs/timecap.yaml`
+- `bench/configs/scaling.yaml`
+
+Each suite writes:
+
+- `environment.json`
+- `resolved_config.json`
+- `run_plan.json`
+- `run_results.json`
+- `runs/<run_id>/summary.csv`
+- `runs/<run_id>/frontiers/`
+- `runs/<run_id>/traces/`
+- `runs/<run_id>/stdout.log`
+- `runs/<run_id>/stderr.log`
+
+Run identity includes solver, threads, dataset, query set, mode, budget, repeat
+index, and git SHA.
+
+Example successful suite output from this phase:
+
+- `bench/results/phase5_timecap_smoke/`
+
 ## Repo Guide
 
 - `src/main.cpp`: CLI, solver dispatch, benchmark artifact wiring
@@ -235,6 +295,7 @@ See `tests/correctness_harness.cpp` and `data/synthetic/README.md`.
 - `inc/algorithms/gcl/`: frontier containers and dominance structures
 - `tests/benchmark_metrics_smoke.cpp`: measurement semantics smoke tests
 - `tests/correctness_harness.cpp`: phase-4 exactness harness
+- `bench/`: phase-5 benchmark manifests, configs, runner, and result layout
 - `scripts/run_correctness_harness.sh`: local correctness entrypoint
 - `ARCHITECTURE.md`: maintainer-oriented code map
 - `run_command.txt`: reproducible local command cookbook
@@ -245,5 +306,5 @@ See `tests/correctness_harness.cpp` and `data/synthetic/README.md`.
 - `SOPMOA_bucket` remains unstable enough that it is not part of the small
   in-process correctness matrix.
 - True `crash` and `oom` classification still belongs in an external runner.
-- The correctness harness is intentionally small and fast; it is not a large
-  benchmark suite.
+- The correctness harness is intentionally small and fast; it is separate from
+  the benchmark harness.
