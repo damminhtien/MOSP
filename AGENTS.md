@@ -19,7 +19,7 @@ The default agent posture is:
 
 ## Active Project State
 
-The repository currently reflects six completed stages:
+The repository currently reflects seven completed stages:
 
 1. shared instrumentation core
 2. unified measurement semantics
@@ -28,6 +28,8 @@ The repository currently reflects six completed stages:
 5. manifest-driven benchmark harness with organized result suites
 6. suite-level benchmark runner with summary aggregation, memory capture, and
    robust run classification
+7. aggregate and figure scripts that turn raw suites into paper-style tables,
+   scaling reports, and research-grade plots
 
 ## Primary Mission
 
@@ -105,6 +107,10 @@ For optimization, benchmarking, or parallelization work, follow this order:
   Compatibility shim for the primary benchmark runner.
 - `bench/scripts/run_benchmark.py`
   Primary benchmark runner with suite summary aggregation and wrapper metadata.
+- `bench/scripts/aggregate_results.py`
+  Suite aggregator for completion, scaling, anytime, and paired-analysis tables.
+- `bench/scripts/plot_results.py`
+  Deterministic figure generator for runtime, scaling, anytime, and memory plots.
 - `bench/manifests/`
   Dataset and query-set manifests.
 - `bench/configs/`
@@ -131,10 +137,15 @@ When benchmark work is relevant, try to answer these:
 - Record dataset id, query-set id, solver, thread count, budget, repeat count,
   git SHA, compiler, and build flags.
 - Use the benchmark harness in `bench/` for comparative experiments.
+- Use the aggregate pipeline in `bench/scripts/aggregate_results.py` and
+  `bench/scripts/plot_results.py` when the user asks for paper tables, speedup,
+  efficiency, anytime quality, or figure-ready outputs.
 - Export machine-readable results only through the canonical summary/frontier/
   trace path.
 - Treat `bench/results/<suite_id>/environment.json` as required context for any
   benchmark report.
+- Treat `bench/results/figures/<analysis_id>/aggregate_manifest.json` as the
+  contract for any aggregate claim.
 
 ## Optimization Priorities
 
@@ -187,6 +198,13 @@ For benchmark-runner or benchmark-config changes, also run at least one config:
 python3 bench/scripts/run_benchmark.py --config bench/configs/timecap.yaml --suite-id local_smoke
 ```
 
+For aggregate or figure changes, also run:
+
+```bash
+python3 bench/scripts/aggregate_results.py --suite local_smoke --analysis-id local_analysis
+python3 bench/scripts/plot_results.py --input-dir bench/results/figures/local_analysis
+```
+
 ## Reporting Contract
 
 When the task involves optimization or benchmark analysis, structure the final
@@ -231,3 +249,6 @@ When project behavior changes, update the relevant docs in the same pass:
   campaign.
 - Performance claims should be grounded in `bench/results/` suites, not ad hoc
   one-off console output.
+- Python aggregate HV support is currently limited to `2` and `3` objectives.
+- Trace-level `hv_ratio` and `recall` in aggregate plots currently come from raw
+  trace artifacts, not a fully recomputed reference frontier at each timestamp.

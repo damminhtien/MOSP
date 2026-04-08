@@ -12,7 +12,7 @@ no `--output`, no `--timelimit`, and no ad hoc solution-log export path.
 
 ## Stage Status
 
-The repository is currently aligned to six completed stages:
+The repository is currently aligned to seven completed stages:
 
 1. Instrumentation core
    One benchmark pipeline based on summary, frontier, and trace artifacts.
@@ -28,6 +28,9 @@ The repository is currently aligned to six completed stages:
 6. Benchmark runner
    Suite-level summary aggregation, wrapper RSS capture, timeout/crash handling,
    and standardized benchmark artifacts now live in the runner.
+7. Aggregate and visualize pipeline
+   Raw suites can now be reduced into paper-style tables, scaling summaries,
+   anytime summaries, and deterministic figures under `bench/results/figures/`.
 
 ## Solver Status
 
@@ -323,6 +326,87 @@ Example successful suite output from this phase:
 
 - `bench/results/phase5_timecap_smoke/`
 - `bench/results/phase6_timecap_demo_v2/`
+
+## Aggregate And Visualize
+
+Phase 7 adds a paper-oriented post-processing layer on top of raw benchmark
+suites.
+
+Primary commands:
+
+```bash
+python3 bench/scripts/aggregate_results.py \
+  --suite phase6_completion_demo \
+  --suite phase6_timecap_demo_v2 \
+  --suite phase7_scaling_demo \
+  --analysis-id phase7_demo
+
+python3 bench/scripts/plot_results.py \
+  --input-dir bench/results/figures/phase7_demo
+```
+
+Aggregate outputs are written under:
+
+- `bench/results/figures/<analysis_id>/`
+
+Main aggregate tables:
+
+- `completion_summary.csv`
+  One row per `dataset / solver / threads` with `num_runs`, completion counts,
+  runtime median/mean/IQR/std, and median `generated`, `expanded`,
+  `final_frontier_size`, and `peak_rss_mb`.
+- `scaling_summary.csv`
+  One row per `dataset / query_set / solver / threads` with median `T(p)`,
+  `speedup = T(1) / T(p)`, and `efficiency = speedup / p`.
+- `anytime_summary.csv`
+  One row per `dataset / solver / threads / budget` with median anytime
+  `hv_ratio`, `recall`, `frontier_size`, and `TTFS`.
+
+Additional aggregate artifacts:
+
+- `all_runs_enriched.csv`
+- `trace_samples.csv`
+- `trace_curve_points.csv`
+- `reference_frontiers.json`
+- `wilcoxon_runtime_pairs.csv`
+- `aggregate_manifest.json`
+- `figures/*.png`
+- `figures/*.svg`
+
+Current figure set:
+
+- runtime boxplot by solver/thread count
+- speedup curve
+- efficiency curve
+- anytime HV-ratio curve
+- anytime recall curve
+- median peak-RSS bar chart
+
+Metric notes:
+
+- `hv_ratio`
+  In the Python aggregate layer, final-frontier HV ratio is computed against a
+  selected reference frontier for `2` and `3` objectives only.
+- `recall`
+  Exact-match recall against the selected reference frontier. This remains
+  available for higher-dimensional frontiers.
+- `TTFS`
+  Time to first solution, taken from the canonical summary row.
+- `speedup`
+  `S(p) = T(1) / T(p)`.
+- `efficiency`
+  `eta(p) = S(p) / p`.
+
+Current aggregate limits:
+
+- Python HV support is intentionally limited to `2` and `3` objectives.
+- For `4+` objectives, the aggregate pipeline falls back to recall,
+  frontier-size, and TTFS-oriented comparison.
+- Trace-level `hv_ratio` and `recall` are still read from raw trace artifacts
+  and therefore reflect the solver trace exporter semantics, not a fully
+  re-normalized reference frontier at every timestamp.
+- `wilcoxon_runtime_pairs.csv` prepares paired data for statistical testing;
+  SciPy is not required or assumed in the local workflow.
 
 ## Repo Guide
 

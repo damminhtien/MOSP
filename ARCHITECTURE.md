@@ -2,8 +2,9 @@
 
 This document is the maintainer view of the current codebase after the legacy
 benchmark path was removed. It explains how execution flows, where measurement
-semantics live, how correctness is checked, and how benchmark suites are
-orchestrated and recorded.
+semantics live, how correctness is checked, how benchmark suites are
+orchestrated and recorded, and how raw suites are aggregated into paper-style
+tables and figures.
 
 ## Project Shape
 
@@ -230,6 +231,51 @@ Each suite writes:
 Each run directory contains canonical solver outputs plus runner metadata and
 captured stdout/stderr.
 
+## Aggregate And Figure Pipeline
+
+Phase 7 adds two post-processing scripts under `bench/scripts/`:
+
+- `aggregate_results.py`
+- `plot_results.py`
+
+`aggregate_results.py` consumes one or more suite-level `summary.csv` files and
+their referenced frontier/trace artifacts, then writes a deterministic analysis
+directory under `bench/results/figures/<analysis_id>/`.
+
+That analysis directory currently contains:
+
+- `all_runs_enriched.csv`
+- `trace_samples.csv`
+- `reference_frontiers.json`
+- `completion_summary.csv`
+- `scaling_summary.csv`
+- `anytime_summary.csv`
+- `trace_curve_points.csv`
+- `wilcoxon_runtime_pairs.csv`
+- `aggregate_manifest.json`
+
+`plot_results.py` reads those aggregate tables and emits paper-oriented figures
+as both `.png` and `.svg`.
+
+Current plot set:
+
+- runtime distribution boxplot
+- speedup curve
+- efficiency curve
+- anytime HV-ratio curve
+- anytime recall curve
+- median peak-RSS bar chart
+
+Current aggregate metric limits:
+
+- final-frontier hypervolume is computed in Python only for `2` and `3`
+  objectives
+- higher-dimensional aggregate comparison falls back to recall,
+  frontier size, and TTFS
+- trace-level `hv_ratio` and `recall` are currently sourced directly from raw
+  trace artifacts rather than being recomputed against the selected reference
+  frontier at every timestamp
+
 ## Stage Map
 
 The repository state after the current cleanup is:
@@ -248,6 +294,9 @@ The repository state after the current cleanup is:
 6. Stage 6
    Benchmark runner writes suite-level summary rows, peak RSS, and robust
    timeout/crash/build-error artifacts.
+7. Stage 7
+   Aggregate scripts and deterministic figures reduce raw suites into
+   paper-style summaries, scaling tables, and anytime plots.
 
 ## Known Limits
 
@@ -255,3 +304,5 @@ The repository state after the current cleanup is:
 - External crash and OOM attribution is still outside the in-process runtime.
 - The correctness harness is intentionally compact; it is not a substitute for
   long-running benchmark campaigns.
+- Python aggregate HV support is intentionally limited to `2` and `3`
+  objectives.

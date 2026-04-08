@@ -11,7 +11,18 @@ cmake --build Release -j4
 # Run the config-driven benchmark harness.
 python3 bench/scripts/run_benchmark.py --config bench/configs/timecap.yaml --suite-id local_timecap
 python3 bench/scripts/run_benchmark.py --config bench/configs/completion.yaml --suite-id local_completion
-python3 bench/scripts/run_benchmark.py --config bench/configs/scaling.yaml --suite-id local_scaling --dry-run
+python3 bench/scripts/run_benchmark.py --config bench/configs/scaling.yaml --suite-id local_scaling
+
+# Aggregate raw suites into paper-style tables.
+python3 bench/scripts/aggregate_results.py \
+  --suite local_completion \
+  --suite local_timecap \
+  --suite local_scaling \
+  --analysis-id local_phase7
+
+# Render deterministic figures from the aggregate output.
+python3 bench/scripts/plot_results.py \
+  --input-dir bench/results/figures/local_phase7
 
 # Prepare output directories for canonical artifacts.
 mkdir -p output/frontiers

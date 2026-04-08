@@ -26,6 +26,14 @@ python3 bench/scripts/run_benchmark.py --config bench/configs/timecap.yaml
 The configs use a JSON-compatible YAML subset so they can be parsed by the
 stdlib-only Python runner without external dependencies.
 
+Phase 7 adds a second layer on top of raw suites:
+
+- `bench/scripts/aggregate_results.py`
+- `bench/scripts/plot_results.py`
+
+These scripts reduce raw benchmark suites into paper-style tables and figures
+under `bench/results/figures/<analysis_id>/`.
+
 ## Dataset Manifest
 
 Location:
@@ -121,6 +129,17 @@ Each benchmark suite creates:
 - `bench/results/<suite_id>/summary.csv`
 - `bench/results/<suite_id>/runs/<run_id>/...`
 
+Aggregate analyses create:
+
+- `bench/results/figures/<analysis_id>/aggregate_manifest.json`
+- `bench/results/figures/<analysis_id>/completion_summary.csv`
+- `bench/results/figures/<analysis_id>/scaling_summary.csv`
+- `bench/results/figures/<analysis_id>/anytime_summary.csv`
+- `bench/results/figures/<analysis_id>/trace_curve_points.csv`
+- `bench/results/figures/<analysis_id>/wilcoxon_runtime_pairs.csv`
+- `bench/results/figures/<analysis_id>/figures/*.png`
+- `bench/results/figures/<analysis_id>/figures/*.svg`
+
 Each run directory contains:
 
 - `run.json`
@@ -181,3 +200,65 @@ Status values are normalized at the runner layer:
 `peak_rss_mb` is currently measured by the runner with an external process
 monitor based on `ps`, which works for the local macOS/Linux workflow. It is
 not yet sourced from the C++ runtime itself.
+
+## Aggregate Commands
+
+End-to-end example:
+
+```bash
+python3 bench/scripts/run_benchmark.py --config bench/configs/completion.yaml --suite-id demo_completion
+python3 bench/scripts/run_benchmark.py --config bench/configs/timecap.yaml --suite-id demo_timecap
+python3 bench/scripts/run_benchmark.py --config bench/configs/scaling.yaml --suite-id demo_scaling
+
+python3 bench/scripts/aggregate_results.py \
+  --suite demo_completion \
+  --suite demo_timecap \
+  --suite demo_scaling \
+  --analysis-id demo_phase7
+
+python3 bench/scripts/plot_results.py \
+  --input-dir bench/results/figures/demo_phase7
+```
+
+## Aggregate Semantics
+
+`completion_summary.csv` groups by `dataset_id / solver / threads` and reports:
+
+- `num_runs`
+- `success_count`
+- `timeout_count`
+- `crash_count`
+- `median_runtime_sec`
+- `mean_runtime_sec`
+- `iqr_runtime_sec`
+- `std_runtime_sec`
+- `median_generated_labels`
+- `median_expanded_labels`
+- `median_final_frontier_size`
+- `median_peak_rss_mb`
+
+`scaling_summary.csv` groups by
+`dataset_id / query_set_id / solver / threads` and reports:
+
+- median `T(p)`
+- `speedup = T(1) / T(p)`
+- `efficiency = speedup / p`
+
+`anytime_summary.csv` groups by `dataset_id / solver / threads / budget_sec`
+and reports:
+
+- median trace `hv_ratio`
+- median trace `recall`
+- median trace `frontier_size`
+- median `time_to_first_solution_sec`
+- median final-frontier reference HV ratio when available
+- median final-frontier reference recall
+
+Current limits:
+
+- Hypervolume is implemented in the Python aggregate layer for `2` and `3`
+  objectives only.
+- Higher-dimensional aggregate analysis falls back to recall, frontier size,
+  and TTFS.
+- `wilcoxon_runtime_pairs.csv` is a paired export for later statistical tests;
+  no SciPy dependency is required by default.
