@@ -20,7 +20,8 @@ public:
     inline bool frontier_check(size_t node, const CostVec<N> & cost) {
         if (node >= gcl.size()) { return false; }
 
-        for (const auto& entry : gcl[node]) {
+        const NodeFrontier& frontier = gcl[node];
+        for (const FrontEntry& entry : frontier) {
             if (weakly_dominate<N>(entry.cost, cost)) { return true; }
         }
         return false;
@@ -33,7 +34,8 @@ public:
             return false; 
         }
 
-        for (auto& existing : gcl[node]) {
+        NodeFrontier& frontier = gcl[node];
+        for (FrontEntry& existing : frontier) {
             if (existing.cost == cost) {
                 if (existing.time_found < 0.0 || (time_found >= 0.0 && time_found < existing.time_found)) {
                     existing.time_found = time_found;
@@ -45,14 +47,20 @@ public:
             }
         }
 
-        auto it = gcl[node].begin();
-        while (it != gcl[node].end()) {
-            if (weakly_dominate<N>(cost, it->cost)) {
-                it = gcl[node].erase(it);
-            } else { it++; }
-        }
+        size_t write_idx = 0;
+        for (size_t read_idx = 0; read_idx < frontier.size(); read_idx++) {
+            if (weakly_dominate<N>(cost, frontier[read_idx].cost)) {
+                continue;
+            }
 
-        gcl[node].push_front(FrontEntry{cost, time_found});
+            if (write_idx != read_idx) {
+                frontier[write_idx] = frontier[read_idx];
+            }
+            write_idx++;
+        }
+        frontier.resize(write_idx);
+
+        frontier.push_back(FrontEntry{cost, time_found});
         return true;
     }
 
@@ -60,15 +68,13 @@ public:
         Snapshot copy;
         if (node >= gcl.size()) { return copy; }
 
-        copy.reserve(gcl[node].size());
-        for (const auto& entry : gcl[node]) {
-            copy.push_back(entry);
-        }
+        copy = gcl[node];
         return copy;
     }
 
 private:
-    std::vector<std::list<FrontEntry>> gcl;
+    using NodeFrontier = std::vector<FrontEntry>;
+    std::vector<NodeFrontier> gcl;
 };
 
 template class Gcl<1>;
