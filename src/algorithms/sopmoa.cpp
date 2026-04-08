@@ -70,7 +70,6 @@ void SOPMOA<N>::solve(double time_limit) {
     num_generation = counters.generated_labels;
     num_expansion = counters.expanded_labels;
     if (benchmark_enabled()) {
-        benchmark_recorder().set_counters(counters);
         set_benchmark_status(
             timed_out.load(std::memory_order_acquire) ? RunStatus::timeout : RunStatus::completed
         );

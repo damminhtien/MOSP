@@ -65,7 +65,6 @@ void SOPMOA_bucket<N>::solve(double time_limit) {
     rebuild_solutions_from_frontier(snapshot_target_frontier());
 
     if (benchmark_enabled()) {
-        benchmark_recorder().set_counters(counter_snapshot());
         set_benchmark_status(
             timed_out.load(std::memory_order_relaxed) ? RunStatus::timeout : RunStatus::completed
         );

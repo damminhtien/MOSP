@@ -75,7 +75,7 @@ void SOPMOA_relaxed<N>::solve(double time_limit) {
         while (worker->inbox.try_pop(stale_batch)) {}
     }
 
-    search_start = std::chrono::steady_clock::now();
+    search_start = BenchmarkClock::now();
 
     const size_t start_owner = owner_of(start_node);
     CostVec<N> start_g;
@@ -114,7 +114,6 @@ void SOPMOA_relaxed<N>::solve(double time_limit) {
 
     collect_final_solutions();
     if (benchmark_enabled()) {
-        benchmark_recorder().set_counters(counter_snapshot());
         set_benchmark_status(
             timed_out.load(std::memory_order_acquire) ? RunStatus::timeout : RunStatus::completed
         );
@@ -410,11 +409,11 @@ bool SOPMOA_relaxed<N>::steal_label(size_t worker_id, std::minstd_rand& rng, Lab
 
 template<int N>
 bool SOPMOA_relaxed<N>::target_dominated(size_t worker_id, const CostVec<N>& cost) {
-    auto start_check = std::chrono::steady_clock::now();
+    auto start_check = BenchmarkClock::now();
     target_frontier_checks_total_.fetch_add(1, std::memory_order_relaxed);
     workers[worker_id]->local_target_checks++;
     bool dominated = gcl_ptr->frontier_check(target_node, cost);
-    auto end_check = std::chrono::steady_clock::now();
+    auto end_check = BenchmarkClock::now();
     workers[worker_id]->frontier_check_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(end_check - start_check).count();
     if (dominated) {
         pruned_by_target_total_.fetch_add(1, std::memory_order_relaxed);
@@ -425,11 +424,11 @@ bool SOPMOA_relaxed<N>::target_dominated(size_t worker_id, const CostVec<N>& cos
 
 template<int N>
 bool SOPMOA_relaxed<N>::node_dominated(size_t worker_id, size_t node, const CostVec<N>& cost) {
-    auto start_check = std::chrono::steady_clock::now();
+    auto start_check = BenchmarkClock::now();
     node_frontier_checks_total_.fetch_add(1, std::memory_order_relaxed);
     workers[worker_id]->local_node_checks++;
     bool dominated = gcl_ptr->frontier_check(node, cost);
-    auto end_check = std::chrono::steady_clock::now();
+    auto end_check = BenchmarkClock::now();
     workers[worker_id]->frontier_check_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(end_check - start_check).count();
     if (dominated) {
         pruned_by_node_total_.fetch_add(1, std::memory_order_relaxed);

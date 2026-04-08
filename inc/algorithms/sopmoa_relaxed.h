@@ -120,7 +120,7 @@ private:
     size_t total_target_checks = 0;
     size_t total_node_checks = 0;
     long long total_frontier_check_ns = 0;
-    std::chrono::steady_clock::time_point search_start;
+    BenchmarkClock::time_point search_start{};
     mutable std::mutex benchmark_trace_lock;
 
     inline size_t owner_of(size_t node) const { return node % num_threads; }
@@ -142,6 +142,9 @@ private:
     CounterSet counter_snapshot() const;
     void maybe_record_interval_sample(double elapsed_sec);
     std::vector<FrontierPoint> snapshot_frontier_points(size_t node) const;
+    void sync_benchmark_recorder() override {
+        benchmark_recorder().set_counters(counter_snapshot());
+    }
 
     std::vector<FrontierPoint> collect_final_frontier() const override {
         return snapshot_frontier_points(target_node);

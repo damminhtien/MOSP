@@ -66,6 +66,9 @@ private:
     CounterSet counter_snapshot() const;
     void maybe_record_interval_sample(double elapsed_sec);
     std::vector<FrontierPoint> snapshot_target_frontier() const;
+    void sync_benchmark_recorder() override {
+        benchmark_recorder().set_counters(counter_snapshot());
+    }
 
     std::vector<FrontierPoint> collect_final_frontier() const override {
         return snapshot_target_frontier();

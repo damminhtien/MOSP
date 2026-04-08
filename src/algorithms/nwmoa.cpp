@@ -50,7 +50,7 @@ void NWMOA<N>::solve(double time_limit) {
     auto snapshot_target_frontier = [this]() {
         return sort_frontier_lexicographically(normalize_frontier(target_frontier_));
     };
-    const double trace_interval_sec = static_cast<double>(benchmark_trace_interval_ms()) / 1000.0;
+    const double trace_interval_sec = benchmark_trace_interval_sec();
     double next_trace_sample_sec = trace_interval_sec > 0.0 ? trace_interval_sec : std::numeric_limits<double>::infinity();
         // std::cout << "HERE0\n";
 
@@ -64,9 +64,8 @@ void NWMOA<N>::solve(double time_limit) {
             return;
         }
 
-        if (sink != nullptr && trace_interval_sec > 0.0 && !target_frontier_.empty() && elapsed_sec >= next_trace_sample_sec) {
-            benchmark_recorder().on_target_frontier_changed(snapshot_target_frontier(), "interval_sample");
-            next_trace_sample_sec += trace_interval_sec;
+        if (benchmark_interval_sample_due(elapsed_sec, next_trace_sample_sec, target_frontier_)) {
+            emit_interval_frontier_sample(snapshot_target_frontier(), next_trace_sample_sec);
         }
 
         // std::pop_heap(open.begin(), open.end(), comparator);
@@ -117,18 +116,11 @@ void NWMOA<N>::solve(double time_limit) {
         cost_last_truncated[curr->node] = curr_f_tr;
 
         if (curr->node == target_node) {
-            std::vector<cost_t> cost(curr->f.begin(), curr->f.end());
-            FrontierPoint point{cost, elapsed_sec};
-            if (sink != nullptr) {
-                sink->on_target_hit_raw();
-            }
-            if (insert_nondominated_frontier_point(target_frontier_, point)) {
-                const std::vector<FrontierPoint> frontier_snapshot = snapshot_target_frontier();
-                rebuild_solutions_from_frontier(frontier_snapshot);
-                if (benchmark_enabled()) {
-                    benchmark_recorder().on_target_frontier_changed(frontier_snapshot, "target_accept");
-                }
-            }
+            record_target_frontier_accept(
+                target_frontier_,
+                FrontierPoint{std::vector<cost_t>(curr->f.begin(), curr->f.end()), elapsed_sec},
+                sink
+            );
             continue;
         }
 

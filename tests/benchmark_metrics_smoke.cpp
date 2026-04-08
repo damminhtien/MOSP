@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cmath>
 #include <functional>
+#include <thread>
 
 #include "algorithms/abstract_solver.h"
 #include "algorithms/emoa.h"
@@ -109,6 +110,59 @@ void run_recorder_subcase(const std::filesystem::path& root) {
     assert(trace_text.find("\"frontier,change\"") != std::string::npos);
 }
 
+void run_frontier_size_semantics_subcase() {
+    BenchmarkRecorder recorder;
+
+    RunMetrics metadata;
+    metadata.solver_name = "FrontierSizeSemantics";
+    metadata.dataset_id = "toy";
+    metadata.query_id = "frontier_size";
+    metadata.start_node = 0;
+    metadata.target_node = 1;
+    metadata.num_objectives = 2;
+
+    recorder.configure(metadata, 0);
+    ThreadLocalSink& sink = recorder.main_thread_sink();
+    sink.on_target_hit_raw();
+    sink.on_target_hit_raw();
+    recorder.set_status(RunStatus::completed);
+
+    const std::vector<FrontierPoint> final_frontier = {
+        {{4, 4}, 0.1},
+    };
+    RunMetrics metrics = recorder.finalize(final_frontier);
+    assert(metrics.counters.target_hits_raw == 2);
+    assert(metrics.counters.final_frontier_size == 1);
+}
+
+class ClockSmokeSolver final : public AbstractSolver {
+public:
+    ClockSmokeSolver(AdjacencyMatrix& graph, size_t start_node, size_t target_node)
+    : AbstractSolver(graph, start_node, target_node) {}
+
+    std::string get_name() override { return "ClockSmokeSolver"; }
+    bool supports_canonical_benchmark_output() const override { return true; }
+
+    void solve(double /*time_limit*/) override {
+        frontier_.clear();
+        const auto local_start = BenchmarkClock::now();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        record_target_frontier_accept(
+            frontier_,
+            FrontierPoint{{1, 1}, benchmark_elapsed_sec(local_start)},
+            &benchmark_recorder().main_thread_sink()
+        );
+        set_benchmark_status(RunStatus::completed);
+    }
+
+private:
+    std::vector<FrontierPoint> frontier_;
+
+    std::vector<FrontierPoint> collect_final_frontier() const override {
+        return frontier_;
+    }
+};
+
 AdjacencyMatrix make_graph() {
     std::vector<Edge> edges;
     edges.push_back(Edge(0, 1, edge_costs(1, 5)));
@@ -131,6 +185,76 @@ AdjacencyMatrix make_inv_graph() {
     edges.push_back(Edge(1, 2, edge_costs(1, 1)));
     edges.push_back(Edge(2, 1, edge_costs(1, 1)));
     return AdjacencyMatrix(4, 2, edges, true);
+}
+
+AdjacencyMatrix make_counter_semantics_graph() {
+    std::vector<Edge> edges;
+    edges.push_back(Edge(0, 1, edge_costs(1, 1)));
+    edges.push_back(Edge(0, 2, edge_costs(5, 5)));
+    edges.push_back(Edge(1, 3, edge_costs(1, 1)));
+    edges.push_back(Edge(2, 3, edge_costs(1, 1)));
+    return AdjacencyMatrix(4, 2, edges);
+}
+
+AdjacencyMatrix make_counter_semantics_inv_graph() {
+    std::vector<Edge> edges;
+    edges.push_back(Edge(0, 1, edge_costs(1, 1)));
+    edges.push_back(Edge(0, 2, edge_costs(5, 5)));
+    edges.push_back(Edge(1, 3, edge_costs(1, 1)));
+    edges.push_back(Edge(2, 3, edge_costs(1, 1)));
+    return AdjacencyMatrix(4, 2, edges, true);
+}
+
+void run_counter_semantics_solver_subcase() {
+    AdjacencyMatrix graph = make_counter_semantics_graph();
+    AdjacencyMatrix inv_graph = make_counter_semantics_inv_graph();
+    std::shared_ptr<AbstractSolver> solver = get_LTMOA_solver(graph, inv_graph, 0, 3);
+
+    BenchmarkRunConfig config;
+    config.dataset_id = "counter_graph";
+    config.query_id = "ltmoa_counter_semantics";
+    config.threads_requested = 1;
+    config.threads_effective = 1;
+    config.budget_sec = 5.0;
+    solver->configure_benchmark_run(config);
+
+    solver->solve(5.0);
+    if (!solver->benchmark_status_set()) {
+        solver->set_benchmark_status(RunStatus::completed);
+    }
+
+    RunMetrics metrics = solver->finalize_benchmark_run();
+    assert(metrics.status == RunStatus::completed);
+    assert(metrics.counters.generated_labels == 4);
+    assert(metrics.counters.expanded_labels == 2);
+    assert(metrics.counters.pruned_by_target == 1);
+    assert(metrics.counters.pruned_by_node == 0);
+    assert(metrics.counters.pruned_other == 0);
+    assert(metrics.counters.target_hits_raw == 1);
+    assert(metrics.counters.final_frontier_size == 1);
+}
+
+void run_clock_solver_subcase() {
+    AdjacencyMatrix graph = make_counter_semantics_graph();
+    ClockSmokeSolver solver(graph, 0, 3);
+
+    BenchmarkRunConfig config;
+    config.dataset_id = "clock_graph";
+    config.query_id = "clock_smoke";
+    config.threads_requested = 1;
+    config.threads_effective = 1;
+    config.budget_sec = 1.0;
+    solver.configure_benchmark_run(config);
+
+    const auto external_start = BenchmarkClock::now();
+    solver.solve(1.0);
+    RunMetrics metrics = solver.finalize_benchmark_run();
+    const double external_runtime = BenchmarkClock::seconds_since(external_start);
+
+    assert(metrics.status == RunStatus::completed);
+    assert(metrics.runtime_sec >= 0.015);
+    assert(metrics.runtime_sec <= external_runtime + 0.05);
+    assert(metrics.time_to_first_solution_sec >= 0.015);
 }
 
 void assert_expected_frontier(const RunMetrics& metrics) {
@@ -278,6 +402,9 @@ int main() {
     std::filesystem::create_directories(root);
 
     run_recorder_subcase(root);
+    run_frontier_size_semantics_subcase();
+    run_counter_semantics_solver_subcase();
+    run_clock_solver_subcase();
     run_gcl_matrix_subcase();
     run_solver_matrix_subcase(root);
 
