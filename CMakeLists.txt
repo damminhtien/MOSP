@@ -46,6 +46,13 @@ target_link_libraries(main PUBLIC TBB::tbb)
 
 if(BUILD_TESTING)
     add_executable(
+        pq_bucket_smoke
+        tests/pq_bucket_smoke.cpp
+    )
+    target_include_directories(pq_bucket_smoke PRIVATE inc)
+    add_test(NAME pq_bucket_smoke COMMAND pq_bucket_smoke)
+
+    add_executable(
         benchmark_metrics_smoke
         tests/benchmark_metrics_smoke.cpp
         ${SOURCES}

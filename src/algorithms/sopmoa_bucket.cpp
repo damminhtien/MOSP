@@ -28,7 +28,7 @@ void SOPMOA_bucket<N>::solve(double time_limit) {
         active.store(false, std::memory_order_relaxed);
     }
 
-    open = pq_bucket<N>(1, 0, 1000);
+    open.clear();
     search_start_ = BenchmarkClock::now();
 
     CostVec<N> start_g;

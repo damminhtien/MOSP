@@ -24,9 +24,8 @@ public:
     : AbstractSolver(adj_matrix, start_node, target_node),
     gcl_ptr(std::make_unique<Gcl_SOPMOA<N>>(adj_matrix.get_num_node())),
     heuristic(Heuristic<N>(target_node, inv_graph)), 
-    num_threads(num_threads > 0 ? std::min(num_threads, NUM_THREADS_) : NUM_THREADS_) {
-        open = pq_bucket<N>(1, 0, 1000);
-    }
+    num_threads(num_threads > 0 ? std::min(num_threads, NUM_THREADS_) : NUM_THREADS_),
+    open(1, 0, 1000) {}
 
     ~SOPMOA_bucket() {
         for (auto ptr : all_labels){ delete ptr; }
