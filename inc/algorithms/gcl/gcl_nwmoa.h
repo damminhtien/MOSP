@@ -14,7 +14,11 @@ public:
 
     using Snapshot = std::vector<FrontEntry>;
 
-    Gcl_NWMOA(size_t num_node) : gcl(num_node + 1) {};
+    Gcl_NWMOA(size_t num_node) : gcl(num_node + 1) {
+        for (auto& frontier : gcl) {
+            frontier.reserve(INITIAL_FRONTIER_CAPACITY);
+        }
+    }
     std::string get_name(){ return "custom_list2"; }
 
     inline bool frontier_check(size_t node, const CostVec<N> & cost) {
@@ -95,6 +99,7 @@ public:
     }
 
 private:
+    static constexpr size_t INITIAL_FRONTIER_CAPACITY = 8;
     using NodeFrontier = std::vector<FrontEntry>;
     std::vector<NodeFrontier> gcl;
 };
