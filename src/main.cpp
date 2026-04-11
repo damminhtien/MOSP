@@ -7,6 +7,10 @@
 #include"algorithms/ltmoa.h"
 #include"algorithms/lazy_ltmoa.h"
 #include"algorithms/ltmoa_array.h"
+#include"algorithms/ltmoa_array_superfast.h"
+#include"algorithms/ltmoa_array_superfast_anytime.h"
+#include"algorithms/ltmoa_array_superfast_lb.h"
+#include"algorithms/ltmoa_parallel.h"
 #include"algorithms/lazy_ltmoa_array.h"
 #include"algorithms/emoa.h"
 #include"algorithms/nwmoa.h"
@@ -62,7 +66,7 @@ int effective_threads_for_algorithm(const string& algorithm, int requested_threa
     if (algorithm == "SOPMOA_bucket") {
         return requested_threads > 0 ? min(requested_threads, 16) : 16;
     }
-    if (algorithm == "SOPMOA_relaxed") {
+    if (algorithm == "SOPMOA_relaxed" || algorithm == "LTMOA_parallel") {
         if (requested_threads > 0) {
             return requested_threads;
         }
@@ -125,6 +129,15 @@ void single_run(
         solver = get_LazyLTMOA_solver(graph, inv_graph, start_node, target_node);
     } else if (algorithm == "LTMOA_array") {
         solver = get_LTMOA_array_solver(graph, inv_graph, start_node, target_node);
+    } else if (algorithm == "LTMOA_array_superfast") {
+        solver = get_LTMOA_array_superfast_solver(graph, inv_graph, start_node, target_node);
+    } else if (algorithm == "LTMOA_array_superfast_anytime") {
+        solver = get_LTMOA_array_superfast_anytime_solver(graph, inv_graph, start_node, target_node);
+    } else if (algorithm == "LTMOA_array_superfast_lb") {
+        solver = get_LTMOA_array_superfast_lb_solver(graph, inv_graph, start_node, target_node);
+    } else if (algorithm == "LTMOA_parallel") {
+        int num_threads = vm["numthreads"].as<int>();
+        solver = get_LTMOA_parallel_solver(graph, inv_graph, start_node, target_node, num_threads);
     } else if (algorithm == "LazyLTMOA_array") {
         solver = get_LazyLTMOA_array_solver(graph, inv_graph, start_node, target_node);
     } else if (algorithm == "EMOA") {
@@ -298,7 +311,7 @@ int main(int argc, char* argv[]) {
         ("from", po::value<int>()->default_value(0), "start from the i-th line of the scenario file")
         ("to", po::value<int>()->default_value(INT_MAX), "up to the i-th line of the scenario file")
         ("map,m",po::value< std::vector<string> >(&cost_files)->multitoken(), "files for edge weight")
-        ("algorithm,a", po::value<std::string>()->default_value("SOPMOA"), "solvers [SOPMOA, SOPMOA_relaxed, SOPMOA_bucket, LTMOA, LazyLTMOA, LTMOA_array, LazyLTMOA_array, EMOA, NWMOA]")
+        ("algorithm,a", po::value<std::string>()->default_value("SOPMOA"), "solvers [SOPMOA, SOPMOA_relaxed, SOPMOA_bucket, LTMOA, LazyLTMOA, LTMOA_array, LTMOA_array_superfast, LTMOA_array_superfast_anytime, LTMOA_array_superfast_lb, LTMOA_parallel, LazyLTMOA_array, EMOA, NWMOA]")
         ("budget-sec", po::value<double>()->default_value(-1.0), "canonical benchmark budget in seconds")
         ("timelimit", po::value<double>()->default_value(-1.0), "legacy cutoff time (seconds)")
         ("logsols", po::value<std::string>()->default_value(""), "if non-empty, dump solution cost to the directory")
@@ -310,7 +323,7 @@ int main(int argc, char* argv[]) {
         ("query-id", po::value<std::string>()->default_value(""), "optional query identifier override")
         ("trace-interval-ms", po::value<uint64_t>()->default_value(0), "trace sampling interval in milliseconds; 0 logs only on frontier changes")
         ("seed", po::value<std::string>()->default_value(""), "optional seed metadata for benchmark artifacts")
-        ("numthreads,n", po::value<int>()->default_value(-1), "number of threads for SOPMOA, SOPMOA_relaxed and SOPMOA_bucket");
+        ("numthreads,n", po::value<int>()->default_value(-1), "number of threads for SOPMOA, SOPMOA_relaxed, SOPMOA_bucket and LTMOA_parallel");
     
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);

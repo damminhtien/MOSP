@@ -106,12 +106,19 @@ All solvers inherit from `AbstractSolver`, which provides:
   concurrent frontier.
 - [src/algorithms/sopmoa_bucket.cpp](/workspaces/SOPMOA/src/algorithms/sopmoa_bucket.cpp):
   parallel variant with a bucket priority queue.
+- [src/algorithms/ltmoa_parallel.cpp](/workspaces/SOPMOA/src/algorithms/ltmoa_parallel.cpp):
+  LTMOA-style parallel search with per-thread heaps and arenas, batched
+  remote delivery, owner-sharded truncated node frontiers, and an exact
+  full-cost target frontier snapshot for pruning.
 
 ### Serial baselines
 
 - [src/algorithms/ltmoa.cpp](/workspaces/SOPMOA/src/algorithms/ltmoa.cpp)
 - [src/algorithms/lazy_ltmoa.cpp](/workspaces/SOPMOA/src/algorithms/lazy_ltmoa.cpp)
 - [src/algorithms/ltmoa_array.cpp](/workspaces/SOPMOA/src/algorithms/ltmoa_array.cpp)
+- [src/algorithms/ltmoa_array_superfast.cpp](/workspaces/SOPMOA/src/algorithms/ltmoa_array_superfast.cpp)
+- [src/algorithms/ltmoa_array_superfast_anytime.cpp](/workspaces/SOPMOA/src/algorithms/ltmoa_array_superfast_anytime.cpp)
+- [src/algorithms/ltmoa_array_superfast_lb.cpp](/workspaces/SOPMOA/src/algorithms/ltmoa_array_superfast_lb.cpp)
 - [src/algorithms/lazy_ltmoa_array.cpp](/workspaces/SOPMOA/src/algorithms/lazy_ltmoa_array.cpp)
 - [src/algorithms/emoa.cpp](/workspaces/SOPMOA/src/algorithms/emoa.cpp)
 - [src/algorithms/nwmoa.cpp](/workspaces/SOPMOA/src/algorithms/nwmoa.cpp)
@@ -125,6 +132,13 @@ These solvers share the same overall pattern:
 5. expand outgoing edges
 6. record a solution when the target is reached
 
+`LTMOA_array_superfast_anytime` is the incumbent-first variant of the
+packed-array LTMOA baseline: it keeps the same exact node frontier and
+target frontier semantics as `LTMOA_array_superfast`, but delays a small
+seed burst until the search has run briefly without an incumbent and
+switches OPEN to an incumbent-aware priority policy only after the first
+accepted target point.
+
 ## Frontier / Dominance Data Structures
 
 The `inc/algorithms/gcl/` directory contains node-local frontier
@@ -132,14 +146,20 @@ representations used for dominance pruning:
 
 - [gcl.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl.h): list-based frontier
 - [gcl_array.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl_array.h): vector-based frontier
+- [gcl_fast_array.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl_fast_array.h): packed contiguous frontier with small-start adaptive growth and fused insert-or-prune
 - [gcl_tree.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl_tree.h): AVL-tree frontier
 - [gcl_nwmoa.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl_nwmoa.h): NWMOA-specific ordered frontier
 - [gcl_sopmoa.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl_sopmoa.h): shared frontier with locks
 - [gcl_relaxed.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl_relaxed.h): relaxed concurrent frontier with snapshots and compaction
+- [gcl_owner_sharded.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl_owner_sharded.h): owner-partitioned wrapper over the packed truncated frontier for `LTMOA_parallel`
 
 This is one of the main design axes in the repo: different solvers use
 different OPEN queues and different frontier containers, but they all
 solve the same MOSP search problem.
+
+Related allocation utility:
+
+- [label_arena.h](/workspaces/SOPMOA/inc/utils/label_arena.h): block allocator used by `LTMOA_array_superfast` and `LTMOA_parallel` to remove per-label `new` from the hot path
 
 ## Data Formats
 
@@ -183,6 +203,8 @@ Key points:
   expanded count, solution count, and runtime
 - some solvers enforce the time limit differently, so `--timelimit` is a
   requested cutoff rather than a strict global guarantee
+- `LTMOA_parallel` is the additional parallel baseline that respects
+  `-n`; the serial baselines still ignore that flag
 - `SOPMOA_bucket` is documented in the README as currently aborting on
   the local benchmark query
 

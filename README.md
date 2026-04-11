@@ -18,6 +18,10 @@ SOPMOA* is a C++17 codebase for exact multi-objective shortest-path (MOSP) searc
 - `LTMOA`
 - `LazyLTMOA`
 - `LTMOA_array`
+- `LTMOA_array_superfast`
+- `LTMOA_array_superfast_anytime`
+- `LTMOA_array_superfast_lb`
+- `LTMOA_parallel`
 - `LazyLTMOA_array`
 - `EMOA`
 - `NWMOA`
@@ -87,7 +91,7 @@ cmake --build Release -j
 The current binary exposes these options:
 
 - `-m, --map <file1> [file2 ...]`: weight files, one file per objective
-- `-a, --algorithm <NAME>`: `SOPMOA | SOPMOA_relaxed | SOPMOA_bucket | LTMOA | LazyLTMOA | LTMOA_array | LazyLTMOA_array | EMOA | NWMOA`
+- `-a, --algorithm <NAME>`: `SOPMOA | SOPMOA_relaxed | SOPMOA_bucket | LTMOA | LazyLTMOA | LTMOA_array | LTMOA_array_superfast | LTMOA_array_superfast_anytime | LTMOA_array_superfast_lb | LTMOA_parallel | LazyLTMOA_array | EMOA | NWMOA`
 - `-s, --start <node>`: single-query start node
 - `-t, --target <node>`: single-query target node
 - `--scenario <file.json>`: batch queries from a scenario JSON file
@@ -95,13 +99,14 @@ The current binary exposes these options:
 - `-o, --output <file.csv>`: required output CSV path
 - `--logsols <dir>`: optional directory for dumping solution fronts
 - `--timelimit <seconds>`: requested per-query time limit
-- `-n, --numthreads <N>`: used by `SOPMOA`, `SOPMOA_relaxed`, and `SOPMOA_bucket`
+- `-n, --numthreads <N>`: used by `SOPMOA`, `SOPMOA_relaxed`, `SOPMOA_bucket`, and `LTMOA_parallel`
 
 Threading note:
 
 - `SOPMOA` currently clamps `-n` to at most `12` threads.
 - `SOPMOA_relaxed` uses the requested `-n` directly.
 - `SOPMOA_bucket` currently clamps `-n` to at most `16` threads.
+- `LTMOA_parallel` uses the requested `-n` directly and owner-shards node frontiers across workers.
 - The other solvers ignore `-n` in the current CLI.
 
 ## Quick Start
@@ -208,6 +213,7 @@ Important caveats:
 - This is a local smoke benchmark, not a publication-grade evaluation.
 - Several baseline solvers exceeded the requested 2-second budget before their next termination check, so their recorded wall times are closer to `3.4-4.3s`.
 - `SOPMOA` and `SOPMOA_relaxed` are the only solvers in the tables below that actually use the `-n 4` setting.
+- `LTMOA_array_superfast`, `LTMOA_array_superfast_anytime`, and `LTMOA_parallel` were added after this April 4, 2026 snapshot, so they are not included in the historical table below.
 
 Reproduction command:
 
