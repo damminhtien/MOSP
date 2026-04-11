@@ -151,8 +151,8 @@ def main() -> int:
         )
         assert_succeeded(sopmoa_result)
         sopmoa_row = read_summary_row(sopmoa_summary_path)
-        if sopmoa_row["threads_requested"] != "13" or sopmoa_row["threads_effective"] != "13":
-            raise AssertionError(f"expected SOPMOA to honor 13 threads: {sopmoa_row}")
+        if sopmoa_row["threads_requested"] != "13" or sopmoa_row["threads_effective"] != "12":
+            raise AssertionError(f"expected SOPMOA to cap 13 requested threads down to 12: {sopmoa_row}")
 
         relaxed_result = run_case(
             binary,
