@@ -165,6 +165,7 @@ private:
     void annotate_anytime_quality_metrics();
     CounterSet current_counters_snapshot() const;
     bool should_record_trace(const std::vector<FrontierPoint>& frontier, double elapsed_sec) const;
+    bool capture_trace_details() const;
     void write_summary_header(std::ofstream& output) const;
 
     RunMetrics metrics_;

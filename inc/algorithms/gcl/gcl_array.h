@@ -12,7 +12,7 @@ public:
     using Snapshot = std::vector<CostVec<N>>;
 
     Gcl_array(size_t num_node) : gcl(num_node + 1) {
-        for (int i = 0; i < num_node; i++) {
+        for (size_t i = 0; i < num_node; i++) {
             gcl[i].reserve(ARRAY_SIZE);
         }
     };
@@ -41,7 +41,10 @@ public:
         }
 
         gcl[node].push_back(cost);
-        for (int i = gcl[node].size() - 2; i >= 0; i--) {
+        size_t idx = gcl[node].size();
+        while (idx > 1) {
+            --idx;
+            const size_t i = idx - 1;
             if (weakly_dominate<N>(cost, gcl[node][i])) {
                 gcl[node][i] = gcl[node].back();
                 gcl[node].pop_back();

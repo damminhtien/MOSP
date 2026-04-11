@@ -13,7 +13,7 @@ public:
     using Snapshot = std::vector<CostVec<N>>;
 
     Gcl_tree(size_t num_node) {
-        for (int i = 0; i < num_node + 1; i++) {
+        for (size_t i = 0; i < num_node + 1; i++) {
             gcl.push_back(AVL_Tree<N>());
         }
     };

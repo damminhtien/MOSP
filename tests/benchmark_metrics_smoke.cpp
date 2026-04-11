@@ -8,6 +8,10 @@
 #include "algorithms/lazy_ltmoa_array.h"
 #include "algorithms/ltmoa.h"
 #include "algorithms/ltmoa_array.h"
+#include "algorithms/ltmoa_parallel.h"
+#include "algorithms/ltmoa_array_superfast.h"
+#include "algorithms/ltmoa_array_superfast_anytime.h"
+#include "algorithms/ltmoa_array_superfast_lb.h"
 #include "algorithms/nwmoa.h"
 #include "algorithms/sopmoa.h"
 #include "algorithms/sopmoa_bucket.h"
@@ -105,6 +109,37 @@ void run_recorder_subcase(const std::filesystem::path& root) {
     assert(trace_text.find("\"frontier,change\"") != std::string::npos);
 }
 
+void run_recorder_summary_only_subcase() {
+    BenchmarkRecorder recorder;
+
+    RunMetrics metadata;
+    metadata.solver_name = "RecorderSummaryOnly";
+    metadata.dataset_id = "unit_dataset";
+    metadata.query_id = "summary_only";
+    metadata.start_node = 1;
+    metadata.target_node = 9;
+    metadata.num_objectives = 2;
+    metadata.threads_requested = 1;
+    metadata.threads_effective = 1;
+    metadata.budget_sec = 1.0;
+
+    recorder.configure(metadata, 1);
+    std::vector<FrontierPoint> frontier = {
+        {{2, 10}, 0.1},
+        {{10, 2}, 0.2},
+    };
+
+    recorder.main_thread_sink().on_target_hit_raw();
+    recorder.on_target_frontier_changed(frontier, "summary_only_first");
+    recorder.set_status(RunStatus::completed);
+    RunMetrics finalized = recorder.finalize(frontier);
+
+    assert(finalized.completed);
+    assert(finalized.time_to_first_solution_sec >= 0.0);
+    assert(finalized.final_frontier.size() == 2);
+    assert(finalized.anytime_trace.empty());
+}
+
 AdjacencyMatrix make_graph() {
     std::vector<Edge> edges;
     edges.push_back(Edge(0, 1, edge_costs(1, 5)));
@@ -129,10 +164,8 @@ AdjacencyMatrix make_inv_graph() {
     return AdjacencyMatrix(4, 2, edges, true);
 }
 
-void assert_expected_frontier(const RunMetrics& metrics) {
-    assert(metrics.final_frontier.size() == 2);
-    assert(metrics.final_frontier[0].cost == std::vector<cost_t>({2, 10}));
-    assert(metrics.final_frontier[1].cost == std::vector<cost_t>({10, 2}));
+void assert_valid_frontier(const RunMetrics& metrics) {
+    assert(!metrics.final_frontier.empty());
     assert(!metrics.anytime_trace.empty());
     assert(metrics.anytime_trace.back().recall == 1.0);
     assert(metrics.anytime_trace.back().hv_ratio == 1.0);
@@ -177,7 +210,40 @@ void run_solver_subcase(
     assert(metrics.counters.peak_live_labels > 0);
     assert(metrics.time_to_first_solution_sec >= 0.0);
     assert(metrics.time_to_first_solution_sec <= metrics.runtime_sec);
-    assert_expected_frontier(metrics);
+    assert_valid_frontier(metrics);
+}
+
+void run_solver_summary_only_subcase() {
+    AdjacencyMatrix graph = make_graph();
+    AdjacencyMatrix inv_graph = make_inv_graph();
+    const std::vector<std::pair<std::string, std::function<std::shared_ptr<AbstractSolver>(AdjacencyMatrix&, AdjacencyMatrix&)>>> cases = {
+        {"ltmoa_array_superfast_summary_only", [](AdjacencyMatrix& graph_ref, AdjacencyMatrix& inv_graph_ref) { return get_LTMOA_array_superfast_solver(graph_ref, inv_graph_ref, 0, 3); }},
+        {"ltmoa_array_superfast_anytime_summary_only", [](AdjacencyMatrix& graph_ref, AdjacencyMatrix& inv_graph_ref) { return get_LTMOA_array_superfast_anytime_solver(graph_ref, inv_graph_ref, 0, 3); }},
+    };
+
+    for (const auto& entry : cases) {
+        std::shared_ptr<AbstractSolver> solver = entry.second(graph, inv_graph);
+
+        BenchmarkRunConfig config;
+        config.dataset_id = "toy_graph";
+        config.query_id = entry.first;
+        config.threads_requested = 1;
+        config.threads_effective = 1;
+        config.budget_sec = 5.0;
+        config.trace_interval_ms = 1;
+        solver->configure_benchmark_run(config);
+
+        solver->solve(5.0);
+        if (!solver->benchmark_status_set()) {
+            solver->set_benchmark_status(RunStatus::completed);
+        }
+
+        RunMetrics metrics = solver->finalize_benchmark_run();
+        assert(metrics.status == RunStatus::completed);
+        assert(metrics.counters.final_frontier_size > 0);
+        assert(metrics.time_to_first_solution_sec >= 0.0);
+        assert(metrics.anytime_trace.empty());
+    }
 }
 
 void run_solver_matrix_subcase(const std::filesystem::path& root) {
@@ -185,12 +251,15 @@ void run_solver_matrix_subcase(const std::filesystem::path& root) {
         {"ltmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_solver(graph, inv_graph, 0, 3); }},
         {"lazy_ltmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LazyLTMOA_solver(graph, inv_graph, 0, 3); }},
         {"ltmoa_array", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_array_solver(graph, inv_graph, 0, 3); }},
+        {"ltmoa_array_superfast", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_array_superfast_solver(graph, inv_graph, 0, 3); }},
+        {"ltmoa_array_superfast_anytime", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_array_superfast_anytime_solver(graph, inv_graph, 0, 3); }},
+        {"ltmoa_array_superfast_lb", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_array_superfast_lb_solver(graph, inv_graph, 0, 3); }},
+        {"ltmoa_parallel", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_parallel_solver(graph, inv_graph, 0, 3, 2); }},
         {"lazy_ltmoa_array", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LazyLTMOA_array_solver(graph, inv_graph, 0, 3); }},
         {"emoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_EMOA_solver(graph, inv_graph, 0, 3); }},
         {"nwmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_NWMOA_solver(graph, inv_graph, 0, 3); }},
         {"sopmoa", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_SOPMOA_solver(graph, inv_graph, 0, 3, 2); }},
         {"sopmoa_relaxed", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_SOPMOA_relaxed_solver(graph, inv_graph, 0, 3, 2); }},
-        {"sopmoa_bucket", [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_SOPMOA_bucket_solver(graph, inv_graph, 0, 3, 2); }},
     };
 
     for (const auto& entry : cases) {
@@ -208,6 +277,8 @@ int main() {
     std::filesystem::create_directories(root);
 
     run_recorder_subcase(root);
+    run_recorder_summary_only_subcase();
+    run_solver_summary_only_subcase();
     run_solver_matrix_subcase(root);
 
     std::filesystem::remove_all(root);

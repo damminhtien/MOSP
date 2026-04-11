@@ -18,7 +18,7 @@ inline CostVec<N-1> truncate(const CostVec<N> & vec){
 
 template <unsigned int N>
 inline bool weakly_dominate(const CostVec<N> & vec1, const CostVec<N> & vec2){
-    for (int i = 0; i < N; i++){
+    for (size_t i = 0; i < N; i++){
         if (vec2[i] < vec1[i]) { return false; }
     }
     return true;
@@ -26,7 +26,7 @@ inline bool weakly_dominate(const CostVec<N> & vec1, const CostVec<N> & vec2){
 
 template <unsigned int N>
 bool weakly_dominate_dr(const CostVec<N> & vec1, const CostVec<N> & vec2){
-    for (int i = 1; i < N; i++){
+    for (size_t i = 1; i < N; i++){
         if (vec2[i] < vec1[i]) { return false; }
     }
     return true;
@@ -34,7 +34,7 @@ bool weakly_dominate_dr(const CostVec<N> & vec1, const CostVec<N> & vec2){
 
 template <unsigned int N>
 bool lex_smaller(const CostVec<N> & vec1, const CostVec<N> & vec2){
-    for (int i = 0; i < N; i++) {
+    for (size_t i = 0; i < N; i++) {
         if (vec1[i] < vec2[i]) { return true; }
         else if (vec1[i] > vec2[i]) { return false; }
     }

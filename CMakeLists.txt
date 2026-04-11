@@ -49,4 +49,13 @@ if(BUILD_TESTING)
     target_include_directories(benchmark_metrics_smoke PRIVATE inc)
     target_link_libraries(benchmark_metrics_smoke PRIVATE ${Boost_LIBRARIES} OpenMP::OpenMP_CXX TBB::tbb)
     add_test(NAME benchmark_metrics_smoke COMMAND benchmark_metrics_smoke)
+
+    add_executable(
+        ltmoa_frontier_regression
+        tests/ltmoa_frontier_regression.cpp
+        ${SOURCES}
+    )
+    target_include_directories(ltmoa_frontier_regression PRIVATE inc)
+    target_link_libraries(ltmoa_frontier_regression PRIVATE ${Boost_LIBRARIES} OpenMP::OpenMP_CXX TBB::tbb)
+    add_test(NAME ltmoa_frontier_regression COMMAND ltmoa_frontier_regression)
 endif()

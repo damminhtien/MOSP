@@ -19,7 +19,8 @@ public:
     : AbstractSolver(adj_matrix, start_node, target_node),
     gcl_ptr(std::make_unique<Gcl_NWMOA<N-1>>(adj_matrix.get_num_node())),
     heuristic(Heuristic<N>(target_node, inv_graph)) {
-        for (size_t i = 0; i <= adj_matrix.get_num_node(); i++) {
+        const size_t num_node = static_cast<size_t>(adj_matrix.get_num_node());
+        for (size_t i = 0; i <= num_node; i++) {
             CostVec<N-1> temp_cost;
             temp_cost.fill(MAX_COST);
             cost_last_truncated.push_back(temp_cost);

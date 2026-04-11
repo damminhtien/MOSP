@@ -20,7 +20,6 @@ void NWMOA<N>::solve(double time_limit) {
             return !(a->f[0] < b->f[0]);
         };
     };
-    comparator_t comparator;
     // std::vector<Label<N>*> open;
     // std::make_heap(open.begin(), open.end(), comparator);
     pq_bucket<N> open(1, 0, 1000);

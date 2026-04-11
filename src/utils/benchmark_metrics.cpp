@@ -338,9 +338,12 @@ CounterSet BenchmarkRecorder::current_counters_snapshot() const {
     return snapshot;
 }
 
+bool BenchmarkRecorder::capture_trace_details() const {
+    return !metrics_.trace_artifact_path.empty();
+}
+
 bool BenchmarkRecorder::should_record_trace(const std::vector<FrontierPoint>& frontier, double elapsed_sec) const {
-    const std::vector<FrontierPoint> normalized = sort_frontier_lexicographically(frontier);
-    if (!frontier_points_equal(normalized, last_frontier_snapshot_)) {
+    if (!frontier_points_equal(frontier, last_frontier_snapshot_)) {
         return true;
     }
 
@@ -360,20 +363,25 @@ void BenchmarkRecorder::on_target_frontier_changed(const std::vector<FrontierPoi
     if (!configured_) { return; }
 
     const double elapsed_sec = BenchmarkClock::seconds_since(start_time_);
-    const std::vector<FrontierPoint> normalized = sort_frontier_lexicographically(frontier);
-
-    if (normalized.empty()) {
-        last_frontier_snapshot_.clear();
-        return;
-    }
-
-    if (!should_record_trace(normalized, elapsed_sec)) {
-        last_frontier_snapshot_ = normalized;
+    if (frontier.empty()) {
+        if (capture_trace_details()) {
+            last_frontier_snapshot_.clear();
+        }
         return;
     }
 
     if (metrics_.time_to_first_solution_sec < 0.0) {
         metrics_.time_to_first_solution_sec = elapsed_sec;
+    }
+
+    if (!capture_trace_details()) {
+        return;
+    }
+
+    const std::vector<FrontierPoint> normalized = sort_frontier_lexicographically(frontier);
+    if (!should_record_trace(normalized, elapsed_sec)) {
+        last_frontier_snapshot_ = normalized;
+        return;
     }
 
     AnytimePoint point;
@@ -398,20 +406,25 @@ void BenchmarkRecorder::on_target_frontier_changed(const std::vector<FrontierPoi
     if (!configured_) { return; }
 
     const double elapsed_sec = BenchmarkClock::seconds_since(start_time_);
-    const std::vector<FrontierPoint> normalized = sort_frontier_lexicographically(frontier);
-
-    if (normalized.empty()) {
-        last_frontier_snapshot_.clear();
-        return;
-    }
-
-    if (!should_record_trace(normalized, elapsed_sec)) {
-        last_frontier_snapshot_ = normalized;
+    if (frontier.empty()) {
+        if (capture_trace_details()) {
+            last_frontier_snapshot_.clear();
+        }
         return;
     }
 
     if (metrics_.time_to_first_solution_sec < 0.0) {
         metrics_.time_to_first_solution_sec = elapsed_sec;
+    }
+
+    if (!capture_trace_details()) {
+        return;
+    }
+
+    const std::vector<FrontierPoint> normalized = sort_frontier_lexicographically(frontier);
+    if (!should_record_trace(normalized, elapsed_sec)) {
+        last_frontier_snapshot_ = normalized;
+        return;
     }
 
     AnytimePoint point;
@@ -497,7 +510,13 @@ RunMetrics BenchmarkRecorder::finalize(const std::vector<FrontierPoint>& final_f
         metrics_.runtime_sec = BenchmarkClock::seconds_since(start_time_);
         metrics_.final_frontier = sort_frontier_lexicographically(normalize_frontier(final_frontier));
         metrics_.counters.final_frontier_size = metrics_.final_frontier.size();
-        annotate_anytime_quality_metrics();
+        if (capture_trace_details()) {
+            annotate_anytime_quality_metrics();
+        } else {
+            metrics_.anytime_trace.clear();
+            trace_frontier_snapshots_.clear();
+            last_frontier_snapshot_.clear();
+        }
         finalized_ = true;
     }
 

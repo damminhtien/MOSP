@@ -120,9 +120,9 @@ public:
 
     std::string get_all_sols_str() {
         std::stringstream ss;
-        for(auto sol : solutions) {
+        for(const auto& sol : solutions) {
             ss << "[" << sol.cost[0];
-            for (int i = 1; i < sol.cost.size(); i++) {
+            for (size_t i = 1; i < sol.cost.size(); i++) {
                 ss << "," << sol.cost[i];
             }
             ss << "]" << std::endl;
