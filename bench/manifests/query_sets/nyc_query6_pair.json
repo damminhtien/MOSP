@@ -1,0 +1,26 @@
+{
+  "manifest_version": "query_set_manifest_v1",
+  "query_set_id": "nyc_query6_pair",
+  "dataset_id": "nyc_3obj",
+  "description": "Two-query smoke slice derived from scen/query6.json for quick benchmark validation.",
+  "source": {
+    "type": "scenario_json",
+    "path": "scen/query6.json"
+  },
+  "queries": [
+    {
+      "query_id": "query3_1",
+      "start": 96000,
+      "target": 38000,
+      "difficulty": "easy",
+      "source": "scen/query6.json"
+    },
+    {
+      "query_id": "query3_2",
+      "start": 215000,
+      "target": 155000,
+      "difficulty": "medium",
+      "source": "scen/query6.json"
+    }
+  ]
+}

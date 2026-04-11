@@ -1,4 +1,5 @@
 #include "algorithms/sopmoa_relaxed.h"
+#include "utils/thread_config.h"
 
 template<int N>
 SOPMOA_relaxed<N>::SOPMOA_relaxed(
@@ -10,7 +11,7 @@ SOPMOA_relaxed<N>::SOPMOA_relaxed(
 )
 : AbstractSolver(adj_matrix, start_node, target_node),
 heuristic(Heuristic<N>(target_node, inv_graph)),
-num_threads(num_threads > 0 ? num_threads : std::max(1u, std::thread::hardware_concurrency())),
+num_threads(resolve_parallel_worker_threads(num_threads)),
 gcl_ptr(std::make_unique<Gcl_relaxed<N>>(adj_matrix.get_num_node())) {
     initialize_workers();
 }
@@ -75,7 +76,7 @@ void SOPMOA_relaxed<N>::solve(double time_limit) {
         while (worker->inbox.try_pop(stale_batch)) {}
     }
 
-    search_start = std::chrono::steady_clock::now();
+    search_start = BenchmarkClock::now();
 
     const size_t start_owner = owner_of(start_node);
     CostVec<N> start_g;
@@ -114,7 +115,6 @@ void SOPMOA_relaxed<N>::solve(double time_limit) {
 
     collect_final_solutions();
     if (benchmark_enabled()) {
-        benchmark_recorder().set_counters(counter_snapshot());
         set_benchmark_status(
             timed_out.load(std::memory_order_acquire) ? RunStatus::timeout : RunStatus::completed
         );
@@ -147,9 +147,7 @@ void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, double time_limit) {
             break;
         }
 
-        const double elapsed = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - search_start
-        ).count();
+        const double elapsed = elapsed_sec();
         if (elapsed > time_limit) {
             timed_out.store(true, std::memory_order_release);
             stop_requested.store(true, std::memory_order_release);
@@ -228,9 +226,7 @@ void SOPMOA_relaxed<N>::worker_loop(size_t worker_id, double time_limit) {
 
 template<int N>
 void SOPMOA_relaxed<N>::process_label(size_t worker_id, Label<N>* curr, double time_limit) {
-    const double elapsed = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - search_start
-    ).count();
+    const double elapsed = elapsed_sec();
     if (elapsed > time_limit) {
         timed_out.store(true, std::memory_order_release);
         stop_requested.store(true, std::memory_order_release);
@@ -414,11 +410,11 @@ bool SOPMOA_relaxed<N>::steal_label(size_t worker_id, std::minstd_rand& rng, Lab
 
 template<int N>
 bool SOPMOA_relaxed<N>::target_dominated(size_t worker_id, const CostVec<N>& cost) {
-    auto start_check = std::chrono::steady_clock::now();
+    auto start_check = BenchmarkClock::now();
     target_frontier_checks_total_.fetch_add(1, std::memory_order_relaxed);
     workers[worker_id]->local_target_checks++;
     bool dominated = gcl_ptr->frontier_check(target_node, cost);
-    auto end_check = std::chrono::steady_clock::now();
+    auto end_check = BenchmarkClock::now();
     workers[worker_id]->frontier_check_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(end_check - start_check).count();
     if (dominated) {
         pruned_by_target_total_.fetch_add(1, std::memory_order_relaxed);
@@ -429,11 +425,11 @@ bool SOPMOA_relaxed<N>::target_dominated(size_t worker_id, const CostVec<N>& cos
 
 template<int N>
 bool SOPMOA_relaxed<N>::node_dominated(size_t worker_id, size_t node, const CostVec<N>& cost) {
-    auto start_check = std::chrono::steady_clock::now();
+    auto start_check = BenchmarkClock::now();
     node_frontier_checks_total_.fetch_add(1, std::memory_order_relaxed);
     workers[worker_id]->local_node_checks++;
     bool dominated = gcl_ptr->frontier_check(node, cost);
-    auto end_check = std::chrono::steady_clock::now();
+    auto end_check = BenchmarkClock::now();
     workers[worker_id]->frontier_check_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(end_check - start_check).count();
     if (dominated) {
         pruned_by_node_total_.fetch_add(1, std::memory_order_relaxed);
@@ -450,6 +446,11 @@ bool SOPMOA_relaxed<N>::frontier_update(size_t node, const CostVec<N>& cost, dou
 template<int N>
 void SOPMOA_relaxed<N>::collect_final_solutions() {
     rebuild_solutions_from_frontier(snapshot_frontier_points(target_node));
+}
+
+template<int N>
+double SOPMOA_relaxed<N>::elapsed_sec() const {
+    return benchmark_elapsed_sec(search_start);
 }
 
 template<int N>

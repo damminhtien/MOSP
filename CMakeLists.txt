@@ -33,8 +33,12 @@ if(APPLE)
     target_compile_definitions(main PRIVATE OS_MAC)
 endif()
 
-find_package(OpenMP REQUIRED)
-target_link_libraries(main PUBLIC OpenMP::OpenMP_CXX)
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(main PUBLIC OpenMP::OpenMP_CXX)
+else()
+    message(WARNING "OpenMP not found; building without OpenMP runtime support")
+endif()
 
 # sudo apt install libtbb-dev
 find_package(TBB REQUIRED)
@@ -42,13 +46,55 @@ target_link_libraries(main PUBLIC TBB::tbb)
 
 if(BUILD_TESTING)
     add_executable(
+        thread_config_smoke
+        tests/thread_config_smoke.cpp
+    )
+    target_include_directories(thread_config_smoke PRIVATE inc)
+    add_test(NAME thread_config_smoke COMMAND thread_config_smoke)
+
+    add_executable(
+        linkedlist_smoke
+        tests/linkedlist_smoke.cpp
+    )
+    target_include_directories(linkedlist_smoke PRIVATE inc)
+    add_test(NAME linkedlist_smoke COMMAND linkedlist_smoke)
+
+    add_executable(
+        pq_bucket_smoke
+        tests/pq_bucket_smoke.cpp
+    )
+    target_include_directories(pq_bucket_smoke PRIVATE inc)
+    add_test(NAME pq_bucket_smoke COMMAND pq_bucket_smoke)
+
+    add_executable(
         benchmark_metrics_smoke
         tests/benchmark_metrics_smoke.cpp
         ${SOURCES}
     )
     target_include_directories(benchmark_metrics_smoke PRIVATE inc)
-    target_link_libraries(benchmark_metrics_smoke PRIVATE ${Boost_LIBRARIES} OpenMP::OpenMP_CXX TBB::tbb)
+    target_link_libraries(benchmark_metrics_smoke PRIVATE ${Boost_LIBRARIES} TBB::tbb)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(benchmark_metrics_smoke PRIVATE OpenMP::OpenMP_CXX)
+    endif()
     add_test(NAME benchmark_metrics_smoke COMMAND benchmark_metrics_smoke)
+
+    add_executable(
+        correctness_harness
+        tests/correctness_harness.cpp
+        ${SOURCES}
+    )
+    target_include_directories(correctness_harness PRIVATE inc)
+    target_link_libraries(correctness_harness PRIVATE ${Boost_LIBRARIES} TBB::tbb)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(correctness_harness PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+    add_test(NAME correctness_harness COMMAND correctness_harness)
+
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(
+        NAME cli_validation_smoke
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/cli_validation_smoke.py $<TARGET_FILE:main>
+    )
 
     add_executable(
         ltmoa_frontier_regression
@@ -56,6 +102,9 @@ if(BUILD_TESTING)
         ${SOURCES}
     )
     target_include_directories(ltmoa_frontier_regression PRIVATE inc)
-    target_link_libraries(ltmoa_frontier_regression PRIVATE ${Boost_LIBRARIES} OpenMP::OpenMP_CXX TBB::tbb)
+    target_link_libraries(ltmoa_frontier_regression PRIVATE ${Boost_LIBRARIES} TBB::tbb)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(ltmoa_frontier_regression PRIVATE OpenMP::OpenMP_CXX)
+    endif()
     add_test(NAME ltmoa_frontier_regression COMMAND ltmoa_frontier_regression)
 endif()

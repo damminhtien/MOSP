@@ -1,101 +1,139 @@
 # Architecture
 
-This document is a short map of the SOPMOA* codebase. It complements
-[README.md](/workspaces/SOPMOA/README.md) by focusing on how the code is
-organized, how execution flows through the system, and where benchmark
-results come from.
+This document is the maintainer view of the current codebase after the legacy
+benchmark path was removed. It explains how execution flows, where measurement
+semantics live, how correctness is checked, how benchmark suites are
+orchestrated and recorded, and how raw suites are aggregated into paper-style
+tables and figures. The research-grade benchmark methodology itself is
+documented under `docs/`.
 
-## Purpose
+## Project Shape
 
-The repository implements exact multi-objective shortest-path (MOSP)
-solvers on large graphs. The main focus is the parallel `SOPMOA` family,
-with several exact baseline solvers included for comparison.
+The repository has one runtime model:
 
-## High-Level Flow
+- load a multi-objective graph
+- run one exact solver
+- emit canonical benchmark artifacts
+- verify exactness and regressions with the built-in harness
 
-1. `main` parses CLI options and selects one solver.
-2. Graph weight files are loaded from one or more map files.
-3. A forward graph and reverse graph are constructed.
-4. The chosen solver precomputes a per-objective heuristic from the
-   reverse graph.
-5. The solver runs either a single `(start, target)` query or a batch of
-   queries from a scenario JSON file.
-6. Statistics are appended to a CSV output file.
-7. If requested, the Pareto front is written to per-query text files.
+There is no secondary legacy output mode.
 
-The main entry point is [src/main.cpp](/workspaces/SOPMOA/src/main.cpp).
+## Execution Flow
 
-## Directory Map
+The main entry point is `src/main.cpp`.
 
-### Root files
+For a normal run the program does the following:
 
-- [CMakeLists.txt](/workspaces/SOPMOA/CMakeLists.txt): build target and
-  dependency wiring.
-- [README.md](/workspaces/SOPMOA/README.md): user-facing build, CLI, data,
-  and benchmark documentation.
-- [run_command.txt](/workspaces/SOPMOA/run_command.txt): local build and
-  benchmark command log.
-- [Preprint.pdf](/workspaces/SOPMOA/Preprint.pdf),
-  [Poster.pdf](/workspaces/SOPMOA/Poster.pdf),
-  [sopmoa_flow.png](/workspaces/SOPMOA/sopmoa_flow.png): research context.
+1. Parse CLI options.
+2. Load one map file per objective through `read_graph_files(...)`.
+3. Build forward and reverse adjacency structures.
+4. Construct the requested solver.
+5. Configure the benchmark run if any canonical artifact path is requested.
+6. Execute either one `(start, target)` query or a scenario slice.
+7. Finalize the run through `BenchmarkRecorder`.
+8. Write summary, frontier, and trace CSV artifacts.
 
-### Source tree
+Scenario mode is just a thin loop over repeated single-query execution with
+stable dataset and query identifiers.
 
-- `src/`: implementations.
-- `inc/`: headers and templates.
-- `lib/json/`: vendored `nlohmann::json`.
-- `maps/`: example NYC objective files.
-- `scen/`: batch query sets in JSON format.
+On top of that CLI, phase 5 adds a Python benchmark runner that expands dataset
+manifests, query manifests, and benchmark configs into organized suites under
+`bench/results/`.
 
-## Core Runtime Pieces
+## Main Runtime Files
 
-### Program entry
+- `src/main.cpp`
+  Solver selection, dataset/query ids, artifact naming, scenario dispatch.
+- `src/utils/data_io.cpp`
+  Map loading and scenario JSON loading.
+- `src/problem/graph.cpp`
+  Forward and reverse graph construction.
+- `src/problem/heuristic.cpp`
+  Reverse single-objective Dijkstra heuristics used by exact solvers.
+- `bench/scripts/run_benchmarks.py`
+  Config-driven benchmark orchestration, environment capture, run identity, and
+  result layout.
+  The phase-6 primary entrypoint is `bench/scripts/run_benchmark.py`; the plural
+  script is only a thin compatibility shim.
 
-- [src/main.cpp](/workspaces/SOPMOA/src/main.cpp)
-  - parses CLI options
-  - dispatches to the selected solver
-  - handles single-query vs scenario mode
-  - measures wall-clock runtime
-  - writes CSV rows and optional solution logs
+## Benchmark Documentation Layer
 
-### Data loading
+Phase 8 adds a dedicated documentation layer for benchmark methodology:
 
-- [src/utils/data_io.cpp](/workspaces/SOPMOA/src/utils/data_io.cpp)
-  - `read_graph_files(...)` loads one file per objective
-  - verifies all map files share the same edge order
-  - `read_scenario_file(...)` parses JSON query batches
+- `docs/benchmark-protocol.md`
+- `docs/benchmark-quickstart.md`
+- `docs/metrics-definition.md`
+- `docs/reproducibility.md`
 
-### Graph model
+These files define the recommended benchmark path. The older CLI examples remain
+only as legacy smoke checks.
 
-- [inc/problem/graph.h](/workspaces/SOPMOA/inc/problem/graph.h)
-- [src/problem/graph.cpp](/workspaces/SOPMOA/src/problem/graph.cpp)
+## Shared Solver Layer
 
-`AdjacencyMatrix` stores adjacency lists, despite the name. The program
-builds both:
+`inc/algorithms/abstract_solver.h` is the shared contract for migrated solvers.
 
-- a forward graph for expansion
-- a reverse graph for heuristic computation
+It provides:
 
-### Heuristic
+- common result storage
+- benchmark-run configuration
+- access to `BenchmarkRecorder`
+- target-frontier helper logic
+- deterministic final frontier collection
+- a single elapsed-time helper based on `BenchmarkClock`
 
-- [inc/problem/heuristic.h](/workspaces/SOPMOA/inc/problem/heuristic.h)
-- [src/problem/heuristic.cpp](/workspaces/SOPMOA/src/problem/heuristic.cpp)
+The important rule is that solver-local code reports events, while the final
+artifact semantics are owned by the shared benchmark layer.
 
-Each solver builds a heuristic by running reverse Dijkstra once per
-objective. This produces an admissible vector lower bound used in the
-label `f = g + h`.
+## Measurement Semantics
 
-### Shared solver API
+The instrumentation core lives in:
 
-- [inc/algorithms/abstract_solver.h](/workspaces/SOPMOA/inc/algorithms/abstract_solver.h)
+- `inc/algorithms/abstract_solver.h`
+- `inc/utils/benchmark_metrics.h`
+- `src/utils/benchmark_metrics.cpp`
 
-All solvers inherit from `AbstractSolver`, which provides:
+The codebase now uses one clock for runtime metrics:
 
-- solution storage
-- `generated` and `expanded` counters
-- a common result string for CSV output
+- `BenchmarkClock`
+- backed by `std::chrono::steady_clock`
 
-## Solver Layout
+The migrated counter meanings are:
+
+- `generated_labels`
+  Increment only when a start or successor label is actually created and
+  enqueued.
+- `expanded_labels`
+  Increment only when a label survives the required checks and enters a valid
+  successor expansion.
+- `pruned_by_target`
+  Rejected by target-frontier dominance.
+- `pruned_by_node`
+  Rejected by node-frontier dominance.
+- `pruned_other`
+  Frontier-update rejection, stale work, or uncategorized prune.
+- `target_hits_raw`
+  Accepted target labels before final frontier normalization.
+- `final_frontier_size`
+  Final nondominated target frontier size, never raw target-hit count.
+- `peak_open_size`
+  Peak queued-label count.
+- `peak_live_labels`
+  Peak live-label count owned by the solver.
+
+## Solver Groups
+
+### Serial exact solvers
+
+Implemented under `src/algorithms/`:
+
+- `ltmoa.cpp`
+- `lazy_ltmoa.cpp`
+- `ltmoa_array.cpp`
+- `lazy_ltmoa_array.cpp`
+- `emoa.cpp`
+- `nwmoa.cpp`
+
+These now share the same benchmark timing and target-frontier recording model.
 
 ### Parallel solvers
 
@@ -111,7 +149,9 @@ All solvers inherit from `AbstractSolver`, which provides:
   remote delivery, owner-sharded truncated node frontiers, and an exact
   full-cost target frontier snapshot for pruning.
 
-### Serial baselines
+These keep solver-specific scheduling and frontier structures, but report
+measurement through the same benchmark model. Shared counters are synchronized
+through atomic accumulation and recorder-sync hooks rather than ad hoc writes.
 
 - [src/algorithms/ltmoa.cpp](/workspaces/SOPMOA/src/algorithms/ltmoa.cpp)
 - [src/algorithms/lazy_ltmoa.cpp](/workspaces/SOPMOA/src/algorithms/lazy_ltmoa.cpp)
@@ -123,14 +163,9 @@ All solvers inherit from `AbstractSolver`, which provides:
 - [src/algorithms/emoa.cpp](/workspaces/SOPMOA/src/algorithms/emoa.cpp)
 - [src/algorithms/nwmoa.cpp](/workspaces/SOPMOA/src/algorithms/nwmoa.cpp)
 
-These solvers share the same overall pattern:
+Node-local and target-frontier data structures live under `inc/algorithms/gcl/`.
 
-1. initialize a label at the start node
-2. pop the next label from OPEN
-3. prune with dominance checks
-4. update the frontier for the current node
-5. expand outgoing edges
-6. record a solution when the target is reached
+Important variants:
 
 `LTMOA_array_superfast_anytime` is the incumbent-first variant of the
 packed-array LTMOA baseline: it keeps the same exact node frontier and
@@ -141,8 +176,8 @@ accepted target point.
 
 ## Frontier / Dominance Data Structures
 
-The `inc/algorithms/gcl/` directory contains node-local frontier
-representations used for dominance pruning:
+The key repository rule is that final frontier export must be canonical even if
+the internal frontier representation is solver-specific.
 
 - [gcl.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl.h): list-based frontier
 - [gcl_array.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl_array.h): vector-based frontier
@@ -153,72 +188,167 @@ representations used for dominance pruning:
 - [gcl_relaxed.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl_relaxed.h): relaxed concurrent frontier with snapshots and compaction
 - [gcl_owner_sharded.h](/workspaces/SOPMOA/inc/algorithms/gcl/gcl_owner_sharded.h): owner-partitioned wrapper over the packed truncated frontier for `LTMOA_parallel`
 
-This is one of the main design axes in the repo: different solvers use
-different OPEN queues and different frontier containers, but they all
-solve the same MOSP search problem.
+The final exported frontier is always:
 
 Related allocation utility:
 
 - [label_arena.h](/workspaces/SOPMOA/inc/utils/label_arena.h): block allocator used by `LTMOA_array_superfast` and `LTMOA_parallel` to remove per-label `new` from the hot path
 
 ## Data Formats
+- normalized
+- nondominated
+- lexicographically sorted
+- written in a deterministic CSV format
 
-### Map files
+The same rule applies to trace rows and summary-row field ordering.
 
-The loader expects DIMACS-like arc lines:
+This keeps regression checks stable across serial and parallel solvers.
 
-```text
-a <from> <to> <weight>
-```
+## Correctness Harness
 
-Multiple map files represent multiple objectives and must share the same
-edge list in the same order.
+Phase 4 introduced the correctness harness in `tests/correctness_harness.cpp`.
 
-### Scenario files
+It uses small generated DAG fixtures across these families:
 
-Scenario files in `scen/` are JSON arrays with:
+- `small_grid`
+- `layered_dag`
+- `random_sparse`
+- `correlated_weights`
+- `anti_correlated`
+- `tie_heavy`
 
-- `name`
-- `start_data`
-- `end_data`
+It checks:
 
-They are used for batch evaluation through `--scenario`.
+- exact frontier equality against an exhaustive reference
+- deterministic frontier export
+- no duplicates
+- no dominated points
+- measurement invariants
+- 1-thread vs multi-thread final-frontier consistency on the supported parallel solvers
 
-## Benchmark Notes
+This harness is wired into CTest and can be run through
+`scripts/run_correctness_harness.sh`.
 
-The current benchmark process is script-based rather than framework-based.
-The main references are:
+## Benchmark Harness
 
-- [README.md](/workspaces/SOPMOA/README.md)
-- [run_command.txt](/workspaces/SOPMOA/run_command.txt)
+Phase 5 introduced a manifest-driven benchmark layer under `bench/`.
 
-Current local benchmarking works by running `./Release/main` repeatedly
-on fixed NYC map files and recording CSV rows.
+Key directories:
 
-Key points:
+- `bench/manifests/datasets/`
+- `bench/manifests/query_sets/`
+- `bench/configs/`
+- `bench/scripts/`
+- `bench/results/`
 
-- runtime is measured in [src/main.cpp](/workspaces/SOPMOA/src/main.cpp)
-  around `solver->solve(...)` using `std::chrono::steady_clock`
-- CSV rows contain solver name, query endpoints, generated count,
-  expanded count, solution count, and runtime
-- some solvers enforce the time limit differently, so `--timelimit` is a
-  requested cutoff rather than a strict global guarantee
-- `LTMOA_parallel` is the additional parallel baseline that respects
-  `-n`; the serial baselines still ignore that flag
-- `SOPMOA_bucket` is documented in the README as currently aborting on
-  the local benchmark query
+The runner in `bench/scripts/run_benchmark.py` does not replace `main`. It
+wraps `main` and standardizes:
 
-## Suggested Reading Order
+- dataset selection
+- query-set selection
+- benchmark mode selection
+- per-run identity
+- repeat handling
+- retry or fail-fast policy
+- environment capture
+- result placement
+- suite-level summary aggregation
+- wrapper-level peak RSS capture
+- timeout and crash classification
 
-For a quick onboarding pass:
+Current supported modes:
 
-1. [README.md](/workspaces/SOPMOA/README.md)
-2. [src/main.cpp](/workspaces/SOPMOA/src/main.cpp)
-3. [src/utils/data_io.cpp](/workspaces/SOPMOA/src/utils/data_io.cpp)
-4. [src/problem/heuristic.cpp](/workspaces/SOPMOA/src/problem/heuristic.cpp)
-5. one baseline solver such as [src/algorithms/ltmoa.cpp](/workspaces/SOPMOA/src/algorithms/ltmoa.cpp)
-6. one parallel solver such as [src/algorithms/sopmoa_relaxed.cpp](/workspaces/SOPMOA/src/algorithms/sopmoa_relaxed.cpp)
-7. the corresponding frontier structure in `inc/algorithms/gcl/`
+- `completion`
+- `time_capped`
+- `scaling`
 
-That sequence gives the shortest path from "how do I run this?" to
-"where is the main algorithmic complexity?"
+Each suite writes:
+
+- `environment.json`
+- `resolved_config.json`
+- `run_plan.json`
+- `run_results.json`
+- `summary.csv`
+- `runs/<run_id>/...`
+
+Each run directory contains canonical solver outputs plus runner metadata and
+captured stdout/stderr.
+
+## Aggregate And Figure Pipeline
+
+Phase 7 adds two post-processing scripts under `bench/scripts/`:
+
+- `aggregate_results.py`
+- `plot_results.py`
+
+`aggregate_results.py` consumes one or more suite-level `summary.csv` files and
+their referenced frontier/trace artifacts, then writes a deterministic analysis
+directory under `bench/results/figures/<analysis_id>/`.
+
+That analysis directory currently contains:
+
+- `all_runs_enriched.csv`
+- `trace_samples.csv`
+- `reference_frontiers.json`
+- `completion_summary.csv`
+- `scaling_summary.csv`
+- `anytime_summary.csv`
+- `trace_curve_points.csv`
+- `wilcoxon_runtime_pairs.csv`
+- `aggregate_manifest.json`
+
+`plot_results.py` reads those aggregate tables and emits paper-oriented figures
+as both `.png` and `.svg`.
+
+Current plot set:
+
+- runtime distribution boxplot
+- speedup curve
+- efficiency curve
+- anytime HV-ratio curve
+- anytime recall curve
+- median peak-RSS bar chart
+
+Current aggregate metric limits:
+
+- final-frontier hypervolume is computed in Python only for `2` and `3`
+  objectives
+- higher-dimensional aggregate comparison falls back to recall,
+  frontier size, and TTFS
+- trace-level `hv_ratio` and `recall` are currently sourced directly from raw
+  trace artifacts rather than being recomputed against the selected reference
+  frontier at every timestamp
+
+## Stage Map
+
+The repository state after the current cleanup is:
+
+1. Stage 1
+   Canonical instrumentation core exists.
+2. Stage 2
+   Main solvers report metrics through shared semantics.
+3. Stage 3
+   Deterministic final-frontier export is enforced.
+4. Stage 4
+   Correctness harness covers exactness and regression safety.
+5. Stage 5
+   Benchmark harness covers datasets, query sets, benchmark modes, and
+   organized result suites.
+6. Stage 6
+   Benchmark runner writes suite-level summary rows, peak RSS, and robust
+   timeout/crash/build-error artifacts.
+7. Stage 7
+   Aggregate scripts and deterministic figures reduce raw suites into
+   paper-style summaries, scaling tables, and anytime plots.
+8. Stage 8
+   Benchmark protocol, metric semantics, quickstart, and reproducibility docs
+   define the recommended research-grade workflow.
+
+## Known Limits
+
+- `SOPMOA_bucket` is still considered experimental for broader regression use.
+- External crash and OOM attribution is still outside the in-process runtime.
+- The correctness harness is intentionally compact; it is not a substitute for
+  long-running benchmark campaigns.
+- Python aggregate HV support is intentionally limited to `2` and `3`
+  objectives.

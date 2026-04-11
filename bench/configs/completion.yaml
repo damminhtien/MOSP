@@ -1,0 +1,41 @@
+{
+  "config_version": "benchmark_config_v1",
+  "mode": "completion",
+  "description": "Completion-mode smoke benchmark on a trivial query with a generous safety budget.",
+  "build_dir": "Release",
+  "binary": "./Release/main",
+  "build": {
+    "enabled": false,
+    "command": ["/usr/local/bin/cmake", "--build", "Release", "-j4"]
+  },
+  "execution": {
+    "kind": "per_query"
+  },
+  "solvers": [
+    {
+      "name": "LTMOA",
+      "thread_counts": [1]
+    },
+    {
+      "name": "SOPMOA_relaxed",
+      "thread_counts": [1]
+    }
+  ],
+  "datasets": ["nyc_3obj"],
+  "query_sets": ["nyc_trivial_completion"],
+  "budgets_sec": [1.0],
+  "repeat_count": 1,
+  "trace_interval_ms": 0,
+  "runtime_control": {
+    "timeout_grace_sec": 10.0
+  },
+  "failure_policy": {
+    "mode": "fail_fast",
+    "max_retries": 0
+  },
+  "output": {
+    "root": "bench/results",
+    "export_frontier": true,
+    "export_trace": true
+  }
+}

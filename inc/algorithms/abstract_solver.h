@@ -107,30 +107,6 @@ public:
         return metrics;
     }
 
-    std::string get_result_str(){
-        std::stringstream ss;
-        ss << get_name() << ","
-        << start_node << "," << target_node << "," 
-        << get_num_generation() << "," 
-        << get_num_expansion() << "," 
-        << solutions.size(); 
-        std::string result = ss.str();
-        return result;
-    }
-
-    std::string get_all_sols_str() {
-        std::stringstream ss;
-        for(const auto& sol : solutions) {
-            ss << "[" << sol.cost[0];
-            for (size_t i = 1; i < sol.cost.size(); i++) {
-                ss << "," << sol.cost[i];
-            }
-            ss << "]" << std::endl;
-        }
-        std::string result = ss.str();
-        return result;
-    }
-
 protected:
     virtual void sync_benchmark_recorder() {}
 
@@ -139,6 +115,60 @@ protected:
             return benchmark_recorder_.elapsed_sec();
         }
         return BenchmarkClock::seconds_since(local_start);
+    }
+
+    double benchmark_trace_interval_sec() const {
+        return static_cast<double>(benchmark_trace_interval_ms()) / 1000.0;
+    }
+
+    bool benchmark_interval_sample_due(
+        double elapsed_sec,
+        double next_trace_sample_sec,
+        const std::vector<FrontierPoint>& current_frontier
+    ) const {
+        return benchmark_enabled()
+            && benchmark_trace_interval_ms() > 0
+            && !current_frontier.empty()
+            && elapsed_sec >= next_trace_sample_sec;
+    }
+
+    void emit_interval_frontier_sample(
+        const std::vector<FrontierPoint>& frontier,
+        double& next_trace_sample_sec,
+        const char* trigger = "interval_sample"
+    ) {
+        if (!benchmark_enabled() || frontier.empty()) {
+            return;
+        }
+
+        benchmark_recorder_.on_target_frontier_changed(frontier, trigger);
+        const double trace_interval_sec = benchmark_trace_interval_sec();
+        if (trace_interval_sec > 0.0 && next_trace_sample_sec != std::numeric_limits<double>::infinity()) {
+            next_trace_sample_sec += trace_interval_sec;
+        }
+    }
+
+    bool record_target_frontier_accept(
+        std::vector<FrontierPoint>& frontier,
+        const FrontierPoint& point,
+        ThreadLocalSink* sink = nullptr,
+        const char* trigger = "target_accept"
+    ) {
+        if (sink != nullptr) {
+            sink->on_target_hit_raw();
+        }
+
+        if (!insert_nondominated_frontier_point(frontier, point)) {
+            return false;
+        }
+
+        const std::vector<FrontierPoint> frontier_snapshot =
+            sort_frontier_lexicographically(normalize_frontier(frontier));
+        rebuild_solutions_from_frontier(frontier_snapshot);
+        if (benchmark_enabled()) {
+            benchmark_recorder_.on_target_frontier_changed(frontier_snapshot, trigger);
+        }
+        return true;
     }
 
     void rebuild_solutions_from_frontier(const std::vector<FrontierPoint>& frontier) {

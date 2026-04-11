@@ -7,41 +7,64 @@
 template<int N>
 class Gcl {
 public:
-    using Snapshot = std::vector<CostVec<N>>;
+    struct FrontEntry {
+        CostVec<N> cost{};
+        double time_found = -1.0;
+    };
 
-    Gcl(size_t num_node) : gcl(num_node + 1) {};
+    using Snapshot = std::vector<FrontEntry>;
+
+    Gcl(size_t num_node) : gcl(num_node + 1) {
+        for (auto& frontier : gcl) {
+            frontier.reserve(INITIAL_FRONTIER_CAPACITY);
+        }
+    }
     std::string get_name(){ return "list"; }
     
     inline bool frontier_check(size_t node, const CostVec<N> & cost) {
         if (node >= gcl.size()) { return false; }
 
-        for (auto & vec : gcl[node]) {
-            if (weakly_dominate<N>(vec, cost)) { return true; }
+        const NodeFrontier& frontier = gcl[node];
+        for (const FrontEntry& entry : frontier) {
+            if (weakly_dominate<N>(entry.cost, cost)) { return true; }
         }
         return false;
     }
 
-    inline bool frontier_update(size_t node, const CostVec<N> & cost) {
+    inline bool frontier_update(size_t node, const CostVec<N> & cost, double time_found = -1.0) {
         if (node >= gcl.size()) { 
             perror(("Invalid Gcl index " + std::to_string(node)).c_str());
             exit(EXIT_FAILURE);
             return false; 
         }
 
-        for (const auto& existing : gcl[node]) {
-            if (weakly_dominate<N>(existing, cost)) {
+        NodeFrontier& frontier = gcl[node];
+        for (FrontEntry& existing : frontier) {
+            if (existing.cost == cost) {
+                if (existing.time_found < 0.0 || (time_found >= 0.0 && time_found < existing.time_found)) {
+                    existing.time_found = time_found;
+                }
+                return false;
+            }
+            if (weakly_dominate<N>(existing.cost, cost)) {
                 return false;
             }
         }
 
-        auto it = gcl[node].begin();
-        while (it != gcl[node].end()) {
-            if (weakly_dominate<N>(cost, *it)) {
-                it = gcl[node].erase(it);
-            } else { it++; }
-        }
+        size_t write_idx = 0;
+        for (size_t read_idx = 0; read_idx < frontier.size(); read_idx++) {
+            if (weakly_dominate<N>(cost, frontier[read_idx].cost)) {
+                continue;
+            }
 
-        gcl[node].push_front(cost);
+            if (write_idx != read_idx) {
+                frontier[write_idx] = frontier[read_idx];
+            }
+            write_idx++;
+        }
+        frontier.resize(write_idx);
+
+        frontier.push_back(FrontEntry{cost, time_found});
         return true;
     }
 
@@ -49,15 +72,14 @@ public:
         Snapshot copy;
         if (node >= gcl.size()) { return copy; }
 
-        copy.reserve(gcl[node].size());
-        for (const auto& cost : gcl[node]) {
-            copy.push_back(cost);
-        }
+        copy = gcl[node];
         return copy;
     }
 
 private:
-    std::vector<std::list<CostVec<N>>> gcl;
+    static constexpr size_t INITIAL_FRONTIER_CAPACITY = 8;
+    using NodeFrontier = std::vector<FrontEntry>;
+    std::vector<NodeFrontier> gcl;
 };
 
 template class Gcl<1>;

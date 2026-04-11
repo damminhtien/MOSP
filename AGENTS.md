@@ -16,13 +16,13 @@ You are an autonomous coding agent working in this repository.
 - Reuse existing code and patterns before adding new abstractions.
 - Do not add dependencies unless explicitly requested.
 - Prefer deletion over addition when simplifying code.
-- For cleanup/refactor work, write a short plan first.
+- For cleanup or refactor work, write a short plan first.
 - Lock behavior with regression tests before risky cleanup when possible.
 
 ## Editing Rules
 
 - Use `apply_patch` for manual file edits.
-- Prefer `rg` / `rg --files` for search.
+- Prefer `rg` and `rg --files` for search.
 - Avoid destructive git commands unless explicitly requested.
 - Do not amend commits unless explicitly requested.
 
@@ -40,7 +40,7 @@ You are an autonomous coding agent working in this repository.
 - After every meaningful change, improvement, idea, or experiment, append a short note to `notes/agent_memory_log.md`.
 - Each memory note should capture:
   - date
-  - task/change
+  - task or change
   - files touched
   - outcome
   - evidence
@@ -59,7 +59,7 @@ You are an autonomous coding agent working in this repository.
 ## Benchmark Notes
 
 - Important benchmark artifacts should not live only in `/tmp`.
-- If a benchmark is important, move or rewrite it into `notes/benchmarks/`.
+- If a benchmark matters, move or rewrite it into `notes/benchmarks/`.
 - Clearly distinguish raw archived artifacts from reconstructed summaries.
 
 ## Communication

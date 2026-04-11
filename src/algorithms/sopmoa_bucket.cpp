@@ -28,7 +28,7 @@ void SOPMOA_bucket<N>::solve(double time_limit) {
         active.store(false, std::memory_order_relaxed);
     }
 
-    open = pq_bucket<N>(1, 0, 1000);
+    open.clear();
     search_start_ = BenchmarkClock::now();
 
     CostVec<N> start_g;
@@ -49,9 +49,15 @@ void SOPMOA_bucket<N>::solve(double time_limit) {
     queued_labels.store(1, std::memory_order_relaxed);
     peak_open_size_.store(1, std::memory_order_relaxed);
 
-    #pragma omp parallel for num_threads(num_threads)
+    std::vector<std::thread> workers;
+    workers.reserve(num_threads);
     for (int i = 0; i < num_threads; i++) {
-        thread_solve(i, time_limit);
+        workers.emplace_back([this, i, time_limit]() {
+            thread_solve(i, time_limit);
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
     }
 
     num_generation = generated_labels_total_.load(std::memory_order_relaxed);
@@ -59,7 +65,6 @@ void SOPMOA_bucket<N>::solve(double time_limit) {
     rebuild_solutions_from_frontier(snapshot_target_frontier());
 
     if (benchmark_enabled()) {
-        benchmark_recorder().set_counters(counter_snapshot());
         set_benchmark_status(
             timed_out.load(std::memory_order_relaxed) ? RunStatus::timeout : RunStatus::completed
         );
@@ -115,21 +120,30 @@ void SOPMOA_bucket<N>::thread_solve(int thread_ID, double time_limit) {
             continue;
         }
 
-        if (!gcl_ptr->frontier_update(curr->node, curr->f)) {
+        if (!gcl_ptr->frontier_update(curr->node, curr->f, elapsed)) {
             pruned_other_total_.fetch_add(1, std::memory_order_relaxed);
             continue;
         }
 
         if (curr->node == target_node) {
             target_hits_raw_total_.fetch_add(1, std::memory_order_relaxed);
-
-            std::lock_guard<std::mutex> guard(benchmark_trace_lock);
-            const FrontierPoint point{
-                std::vector<cost_t>(curr->f.begin(), curr->f.end()),
-                elapsed
-            };
-            if (insert_nondominated_frontier_point(target_frontier_, point) && benchmark_enabled()) {
-                benchmark_recorder().on_target_frontier_changed(target_frontier_, counter_snapshot(), "target_accept");
+            if (benchmark_enabled()) {
+                std::lock_guard<std::mutex> guard(benchmark_trace_lock);
+                const FrontierPoint point{
+                    std::vector<cost_t>(curr->f.begin(), curr->f.end()),
+                    elapsed
+                };
+                if (insert_nondominated_frontier_point(target_frontier_, point)) {
+                    const std::vector<FrontierPoint> frontier_snapshot =
+                        sort_frontier_lexicographically(normalize_frontier(target_frontier_));
+                    benchmark_recorder().on_target_frontier_changed(frontier_snapshot, counter_snapshot(), "target_accept");
+                }
+            } else {
+                std::lock_guard<std::mutex> guard(benchmark_trace_lock);
+                insert_nondominated_frontier_point(
+                    target_frontier_,
+                    FrontierPoint{std::vector<cost_t>(curr->f.begin(), curr->f.end()), elapsed}
+                );
             }
             continue;
         }
@@ -199,7 +213,7 @@ bool SOPMOA_bucket<N>::any_thread_active() const {
 
 template<int N>
 double SOPMOA_bucket<N>::elapsed_sec() const {
-    return BenchmarkClock::seconds_since(search_start_);
+    return benchmark_elapsed_sec(search_start_);
 }
 
 template<int N>
@@ -237,10 +251,14 @@ void SOPMOA_bucket<N>::maybe_record_interval_sample(double elapsed) {
 
     std::lock_guard<std::mutex> guard(benchmark_trace_lock);
     next_due = next_trace_sample_ms_.load(std::memory_order_relaxed);
-    if (elapsed_ms < next_due || next_due == 0 || target_frontier_.empty()) { return; }
+    if (elapsed_ms < next_due || next_due == 0) { return; }
+
+    const std::vector<FrontierPoint> frontier_snapshot =
+        sort_frontier_lexicographically(normalize_frontier(target_frontier_));
+    if (frontier_snapshot.empty()) { return; }
 
     next_trace_sample_ms_.store(next_due + interval_ms, std::memory_order_relaxed);
-    benchmark_recorder().on_target_frontier_changed(target_frontier_, counter_snapshot(), "interval_sample");
+    benchmark_recorder().on_target_frontier_changed(frontier_snapshot, counter_snapshot(), "interval_sample");
 }
 
 template<int N>

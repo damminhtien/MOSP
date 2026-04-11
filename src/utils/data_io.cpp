@@ -4,8 +4,7 @@ void read_graph_files(std::vector<std::string> file_paths, size_t &num_node, siz
     size_t max_node_id = 0;
     num_obj = file_paths.size();
     if (num_obj > Edge::MAX_NUM_OBJ) {
-        perror(("Too many objective files: " + std::to_string(num_obj)).c_str());
-        exit(EXIT_FAILURE);
+        throw std::runtime_error("Too many objective files: " + std::to_string(num_obj));
     }
 
     for (size_t obj_idx = 0; obj_idx < file_paths.size(); obj_idx++) {
@@ -13,8 +12,7 @@ void read_graph_files(std::vector<std::string> file_paths, size_t &num_node, siz
         std::ifstream gr_file;
         gr_file.open(file_path);
         if(!gr_file.is_open()) {
-            perror(("Error open file " + file_path).c_str());
-            exit(EXIT_FAILURE);
+            throw std::runtime_error("Error opening file " + file_path);
         }
 
         std::string line;
@@ -36,8 +34,7 @@ void read_graph_files(std::vector<std::string> file_paths, size_t &num_node, siz
 
                 if (edge_id < edges.size()) { // Read from second graph file until last
                     if (head != edges[edge_id].head || tail != edges[edge_id].tail) {
-                        perror(("Graph file inconsistency " + file_path).c_str());
-                        exit(EXIT_FAILURE);
+                        throw std::runtime_error("Graph file inconsistency " + file_path);
                     }
                     edges[edge_id].cost[obj_idx] = weight;
                 } else { // Read from first graph file
@@ -62,11 +59,21 @@ std::vector<std::tuple<std::string, size_t, size_t>> read_scenario_file(std::str
 
     nlohmann::json scen_datas;
     std::ifstream ifs(file_path);
-    if (ifs.is_open()) {
-        scen_datas = nlohmann::json::parse(ifs);
+    if (!ifs.is_open()) {
+        throw std::runtime_error("Cannot open scenario file " + file_path);
+    }
+    scen_datas = nlohmann::json::parse(ifs);
+    if (!scen_datas.is_array()) {
+        throw std::runtime_error("Scenario file must be a JSON array: " + file_path);
     }
     
-    for (auto scen_data : scen_datas) {
+    for (const auto& scen_data : scen_datas) {
+        if (!scen_data.is_object()
+            || !scen_data.contains("name")
+            || !scen_data.contains("start_data")
+            || !scen_data.contains("end_data")) {
+            throw std::runtime_error("Scenario entry missing required fields in " + file_path);
+        }
         std::string name = scen_data["name"].get<std::string>();
         size_t start_node = scen_data["start_data"].get<size_t>();
         size_t end_node = scen_data["end_data"].get<size_t>();

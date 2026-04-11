@@ -40,7 +40,7 @@ private:
     std::vector<FrontierPoint> target_frontier_;
 
     std::vector<FrontierPoint> collect_final_frontier() const override {
-        return sort_frontier_lexicographically(target_frontier_);
+        return sort_frontier_lexicographically(normalize_frontier(target_frontier_));
     }
 };
 
