@@ -1,0 +1,713 @@
+#include "algorithms/ltmoa_array_superfast_anytime.h"
+
+#include <cmath>
+#include <queue>
+
+template<int N>
+void LTMOA_array_superfast_anytime<N>::solve(double time_limit) {
+    if (benchmark_enabled()) {
+        solve_impl<true>(time_limit);
+        return;
+    }
+    solve_impl<false>(time_limit);
+}
+
+template<int N>
+bool LTMOA_array_superfast_anytime<N>::OpenEntry::larger_for_pq::operator()(
+    const OpenEntry& lhs,
+    const OpenEntry& rhs
+) const {
+    if (lhs.improve_count != rhs.improve_count) {
+        return lhs.improve_count < rhs.improve_count;
+    }
+    if (lhs.slack_sum != rhs.slack_sum) {
+        return lhs.slack_sum > rhs.slack_sum;
+    }
+    if (LTMOA_array_superfast_anytime<N>::lex_less(rhs.label->f, lhs.label->f)) {
+        return true;
+    }
+    if (LTMOA_array_superfast_anytime<N>::lex_less(lhs.label->f, rhs.label->f)) {
+        return false;
+    }
+    return lhs.label->node > rhs.label->node;
+}
+
+template<int N>
+bool LTMOA_array_superfast_anytime<N>::ScalarSeedEntry::larger_for_pq::operator()(
+    const ScalarSeedEntry& lhs,
+    const ScalarSeedEntry& rhs
+) const {
+    if (lhs.f_scalar != rhs.f_scalar) {
+        return lhs.f_scalar > rhs.f_scalar;
+    }
+    if (LTMOA_array_superfast_anytime<N>::lex_less(rhs.g_vec, lhs.g_vec)) {
+        return true;
+    }
+    if (LTMOA_array_superfast_anytime<N>::lex_less(lhs.g_vec, rhs.g_vec)) {
+        return false;
+    }
+    return lhs.node > rhs.node;
+}
+
+template<int N>
+uint64_t LTMOA_array_superfast_anytime<N>::guarded_add_u64(uint64_t lhs, uint64_t rhs) {
+    const uint64_t limit = std::numeric_limits<uint64_t>::max();
+    if (lhs > limit - rhs) {
+        return limit;
+    }
+    return lhs + rhs;
+}
+
+template<int N>
+uint64_t LTMOA_array_superfast_anytime<N>::weighted_dot(const CostVec<N>& weights, const CostVec<N>& values) {
+    uint64_t total = 0;
+    for (int idx = 0; idx < N; idx++) {
+        total = guarded_add_u64(
+            total,
+            static_cast<uint64_t>(weights[idx]) * static_cast<uint64_t>(values[idx])
+        );
+    }
+    return total;
+}
+
+template<int N>
+uint64_t LTMOA_array_superfast_anytime<N>::weighted_dot_edge(
+    const CostVec<N>& weights,
+    const std::array<cost_t, Edge::MAX_NUM_OBJ>& values
+) {
+    uint64_t total = 0;
+    for (int idx = 0; idx < N; idx++) {
+        total = guarded_add_u64(
+            total,
+            static_cast<uint64_t>(weights[idx]) * static_cast<uint64_t>(values[idx])
+        );
+    }
+    return total;
+}
+
+template<int N>
+bool LTMOA_array_superfast_anytime<N>::lex_less(const CostVec<N>& lhs, const CostVec<N>& rhs) {
+    for (int idx = 0; idx < N; idx++) {
+        if (lhs[idx] < rhs[idx]) {
+            return true;
+        }
+        if (lhs[idx] > rhs[idx]) {
+            return false;
+        }
+    }
+    return false;
+}
+
+template<int N>
+bool LTMOA_array_superfast_anytime<N>::better_scalar_state(
+    uint64_t lhs_scalar,
+    const CostVec<N>& lhs_vec,
+    uint64_t rhs_scalar,
+    const CostVec<N>& rhs_vec
+) {
+    if (lhs_scalar != rhs_scalar) {
+        return lhs_scalar < rhs_scalar;
+    }
+    return lex_less(lhs_vec, rhs_vec);
+}
+
+template<int N>
+void LTMOA_array_superfast_anytime<N>::recompute_target_component_min() const {
+    target_component_min_.fill(MAX_COST);
+    for (const auto& point : target_frontier_exact_) {
+        for (int idx = 0; idx < N; idx++) {
+            target_component_min_[idx] = std::min(target_component_min_[idx], point.cost[idx]);
+        }
+    }
+    target_component_min_dirty_ = false;
+}
+
+template<int N>
+bool LTMOA_array_superfast_anytime<N>::target_dominated(const CostVec<N>& cost) const {
+    if (target_frontier_exact_.empty()) {
+        return false;
+    }
+
+    if (target_component_min_dirty_) {
+        recompute_target_component_min();
+    }
+
+    for (int idx = 0; idx < N; idx++) {
+        if (cost[idx] < target_component_min_[idx]) {
+            return false;
+        }
+    }
+
+    for (const auto& point : target_frontier_exact_) {
+        if (weakly_dominate<N>(point.cost, cost)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+template<int N>
+typename LTMOA_array_superfast_anytime<N>::AcceptTargetResult
+LTMOA_array_superfast_anytime<N>::accept_target(const CostVec<N>& cost, double elapsed_sec) {
+    AcceptTargetResult result;
+    const bool old_empty = target_frontier_exact_.empty();
+    const CostVec<N> old_min = target_component_min_;
+    bool removed_min_contributor = false;
+
+    size_t idx = 0;
+    while (idx < target_frontier_exact_.size()) {
+        ExactTargetPoint& existing = target_frontier_exact_[idx];
+        if (existing.cost == cost) {
+            if (existing.time_found_sec < 0.0 || elapsed_sec < existing.time_found_sec) {
+                existing.time_found_sec = elapsed_sec;
+                target_frontier_export_cache_dirty_ = true;
+                result.accepted = true;
+            }
+            return result;
+        }
+        if (weakly_dominate<N>(existing.cost, cost)) {
+            return result;
+        }
+        if (weakly_dominate<N>(cost, existing.cost)) {
+            for (int cost_idx = 0; cost_idx < N; cost_idx++) {
+                if (!old_empty && existing.cost[cost_idx] == target_component_min_[cost_idx]) {
+                    removed_min_contributor = true;
+                    break;
+                }
+            }
+            target_frontier_exact_[idx] = target_frontier_exact_.back();
+            target_frontier_exact_.pop_back();
+            continue;
+        }
+        idx++;
+    }
+
+    target_frontier_exact_.push_back({cost, elapsed_sec});
+    target_frontier_export_cache_dirty_ = true;
+    result.accepted = true;
+    result.first_incumbent = old_empty;
+
+    if (result.first_incumbent) {
+        target_component_min_ = cost;
+        target_component_min_dirty_ = false;
+        result.minima_changed = true;
+    } else {
+        if (removed_min_contributor) {
+            target_component_min_dirty_ = true;
+        }
+
+        if (!target_component_min_dirty_) {
+            for (int cost_idx = 0; cost_idx < N; cost_idx++) {
+                target_component_min_[cost_idx] = std::min(target_component_min_[cost_idx], cost[cost_idx]);
+            }
+        } else {
+            recompute_target_component_min();
+        }
+
+        result.minima_changed = target_component_min_ != old_min;
+    }
+
+    if (result.first_incumbent || result.minima_changed) {
+        target_revision_++;
+    }
+
+    return result;
+}
+
+template<int N>
+bool LTMOA_array_superfast_anytime<N>::run_scalar_seed(
+    const CostVec<N>& weights,
+    double seed_deadline_sec,
+    const BenchmarkClock::time_point& local_start_time,
+    CostVec<N>& solution_cost
+) {
+    if (benchmark_elapsed_sec(local_start_time) >= seed_deadline_sec) {
+        return false;
+    }
+
+    if (seed_stamp_ == std::numeric_limits<uint32_t>::max()) {
+        for (auto& state : seed_states_) {
+            state.stamp = 0;
+        }
+        seed_stamp_ = 0;
+    }
+    seed_stamp_++;
+
+    std::priority_queue<
+        ScalarSeedEntry,
+        std::vector<ScalarSeedEntry>,
+        typename ScalarSeedEntry::larger_for_pq
+    > open;
+
+    CostVec<N> start_g{};
+    start_g.fill(0);
+    seed_states_[start_node].stamp = seed_stamp_;
+    seed_states_[start_node].g_scalar = 0;
+    seed_states_[start_node].g_vec = start_g;
+    open.push({
+        start_node,
+        0,
+        weighted_dot(weights, heuristic_(start_node)),
+        start_g
+    });
+
+    while (!open.empty()) {
+        if (benchmark_elapsed_sec(local_start_time) >= seed_deadline_sec) {
+            return false;
+        }
+
+        const ScalarSeedEntry curr = open.top();
+        open.pop();
+
+        ScalarSeedState& curr_state = seed_states_[curr.node];
+        if (curr_state.stamp != seed_stamp_) {
+            continue;
+        }
+        if (curr_state.g_scalar != curr.g_scalar || curr_state.g_vec != curr.g_vec) {
+            continue;
+        }
+
+        if (curr.node == target_node) {
+            solution_cost = curr.g_vec;
+            return true;
+        }
+
+        const std::vector<Edge>& outgoing_edges = graph[curr.node];
+        for (const auto& edge : outgoing_edges) {
+            CostVec<N> next_g_vec = curr.g_vec;
+            for (int idx = 0; idx < N; idx++) {
+                next_g_vec[idx] += edge.cost[idx];
+            }
+
+            const uint64_t next_g_scalar = guarded_add_u64(curr.g_scalar, weighted_dot_edge(weights, edge.cost));
+            ScalarSeedState& next_state = seed_states_[edge.tail];
+            if (next_state.stamp == seed_stamp_
+                && !better_scalar_state(next_g_scalar, next_g_vec, next_state.g_scalar, next_state.g_vec)) {
+                continue;
+            }
+
+            next_state.stamp = seed_stamp_;
+            next_state.g_scalar = next_g_scalar;
+            next_state.g_vec = next_g_vec;
+            open.push({
+                edge.tail,
+                next_g_scalar,
+                guarded_add_u64(next_g_scalar, weighted_dot(weights, heuristic_(edge.tail))),
+                next_g_vec
+            });
+        }
+    }
+
+    return false;
+}
+
+template<int N>
+template<bool EnableMetrics>
+void LTMOA_array_superfast_anytime<N>::maybe_run_deferred_seed_burst(
+    double time_limit,
+    double elapsed_sec,
+    const BenchmarkClock::time_point& local_start_time,
+    std::vector<Label<N>*>& lex_open,
+    std::vector<OpenEntry>& anytime_open
+) {
+    if (seed_burst_attempted_ || !target_frontier_exact_.empty()) {
+        return;
+    }
+
+    if (std::isfinite(time_limit) && time_limit < 0.05) {
+        seed_burst_attempted_ = true;
+        return;
+    }
+
+    const double trigger_time_sec = std::isfinite(time_limit)
+        ? std::min(0.003, 0.02 * time_limit)
+        : 0.003;
+    if (elapsed_sec < trigger_time_sec && num_expansion < 2048) {
+        return;
+    }
+
+    seed_burst_attempted_ = true;
+
+    double burst_budget_sec = std::isfinite(time_limit)
+        ? std::min(0.002, 0.01 * time_limit)
+        : 0.002;
+    if (std::isfinite(time_limit)) {
+        burst_budget_sec = std::min(burst_budget_sec, std::max(0.0, time_limit - elapsed_sec));
+    }
+    if (burst_budget_sec <= 0.0) {
+        return;
+    }
+
+    const double seed_deadline_sec = elapsed_sec + burst_budget_sec;
+
+    CostVec<N> e0{};
+    e0.fill(0);
+    e0[0] = 1;
+
+    CostVec<N> all_ones{};
+    all_ones.fill(1);
+
+    const std::array<CostVec<N>, 2> weights = {e0, all_ones};
+    for (size_t weight_idx = 0; weight_idx < weights.size(); weight_idx++) {
+        if (weight_idx > 0 && !target_frontier_exact_.empty()) {
+            break;
+        }
+
+        CostVec<N> solution_cost{};
+        if (!run_scalar_seed(weights[weight_idx], seed_deadline_sec, local_start_time, solution_cost)) {
+            if (benchmark_elapsed_sec(local_start_time) >= seed_deadline_sec) {
+                break;
+            }
+            continue;
+        }
+
+        const double accept_elapsed_sec = benchmark_elapsed_sec(local_start_time);
+        const AcceptTargetResult accept_result = accept_target(solution_cost, accept_elapsed_sec);
+        if (!accept_result.accepted) {
+            continue;
+        }
+
+        if constexpr (EnableMetrics) {
+            benchmark_recorder().main_thread_sink().on_target_hit_raw();
+            benchmark_recorder().on_target_frontier_changed(target_frontier_export_cache(), "deferred_seed");
+        }
+
+        if (accept_result.first_incumbent) {
+            activate_anytime_open(lex_open, anytime_open);
+        }
+        break;
+    }
+}
+
+template<int N>
+void LTMOA_array_superfast_anytime<N>::materialize_target_frontier_export_cache() const {
+    if (!target_frontier_export_cache_dirty_) {
+        return;
+    }
+
+    target_frontier_export_cache_.clear();
+    target_frontier_export_cache_.reserve(target_frontier_exact_.size());
+    for (const auto& point : target_frontier_exact_) {
+        target_frontier_export_cache_.push_back({
+            std::vector<cost_t>(point.cost.begin(), point.cost.end()),
+            point.time_found_sec
+        });
+    }
+    target_frontier_export_cache_dirty_ = false;
+}
+
+template<int N>
+const std::vector<FrontierPoint>& LTMOA_array_superfast_anytime<N>::target_frontier_export_cache() const {
+    materialize_target_frontier_export_cache();
+    return target_frontier_export_cache_;
+}
+
+template<int N>
+void LTMOA_array_superfast_anytime<N>::rebuild_solutions_from_exact_target_frontier() {
+    rebuild_solutions_from_frontier(target_frontier_export_cache());
+}
+
+template<int N>
+typename LTMOA_array_superfast_anytime<N>::OpenEntry
+LTMOA_array_superfast_anytime<N>::make_open_entry(Label<N>* label) const {
+    if (target_component_min_dirty_) {
+        recompute_target_component_min();
+    }
+
+    OpenEntry entry;
+    entry.label = label;
+    entry.revision = target_revision_;
+    entry.improve_count = 0;
+    entry.slack_sum = 0;
+
+    for (int idx = 0; idx < N; idx++) {
+        if (label->f[idx] < target_component_min_[idx]) {
+            entry.improve_count++;
+            continue;
+        }
+
+        entry.slack_sum = guarded_add_u64(
+            entry.slack_sum,
+            static_cast<uint64_t>(label->f[idx] - target_component_min_[idx])
+        );
+    }
+
+    return entry;
+}
+
+template<int N>
+void LTMOA_array_superfast_anytime<N>::activate_anytime_open(
+    std::vector<Label<N>*>& lex_open,
+    std::vector<OpenEntry>& anytime_open
+) {
+    if (anytime_open_active_) {
+        return;
+    }
+
+    anytime_open_active_ = true;
+    typename OpenEntry::larger_for_pq comparator;
+    anytime_open.reserve(lex_open.size());
+    for (Label<N>* label : lex_open) {
+        anytime_open.push_back(make_open_entry(label));
+        std::push_heap(anytime_open.begin(), anytime_open.end(), comparator);
+    }
+    lex_open.clear();
+}
+
+template<int N>
+bool LTMOA_array_superfast_anytime<N>::pop_anytime_open(
+    std::vector<OpenEntry>& anytime_open,
+    Label<N>*& label
+) {
+    typename OpenEntry::larger_for_pq comparator;
+    while (!anytime_open.empty()) {
+        std::pop_heap(anytime_open.begin(), anytime_open.end(), comparator);
+        OpenEntry entry = anytime_open.back();
+        anytime_open.pop_back();
+
+        if (entry.revision != target_revision_) {
+            anytime_open.push_back(make_open_entry(entry.label));
+            std::push_heap(anytime_open.begin(), anytime_open.end(), comparator);
+            continue;
+        }
+
+        label = entry.label;
+        return true;
+    }
+
+    return false;
+}
+
+template<int N>
+template<bool EnableMetrics>
+void LTMOA_array_superfast_anytime<N>::solve_impl(double time_limit) {
+    std::cout << "start LTMOA_array_superfast_anytime\n";
+
+    solutions.clear();
+    target_frontier_exact_.clear();
+    target_frontier_export_cache_.clear();
+    target_frontier_export_cache_dirty_ = false;
+    target_component_min_.fill(MAX_COST);
+    target_component_min_dirty_ = false;
+    num_generation = 0;
+    num_expansion = 0;
+    seed_burst_attempted_ = false;
+    anytime_open_active_ = false;
+    target_revision_ = 0;
+    arena_.clear();
+    gcl_.clear();
+
+    const auto local_start_time = BenchmarkClock::now();
+    auto elapsed_seconds = [this, &local_start_time]() {
+        return benchmark_elapsed_sec(local_start_time);
+    };
+
+    typename Label<N>::lex_larger_for_PQ lex_comparator;
+    std::vector<Label<N>*> lex_open;
+    std::make_heap(lex_open.begin(), lex_open.end(), lex_comparator);
+
+    typename OpenEntry::larger_for_pq anytime_comparator;
+    std::vector<OpenEntry> anytime_open;
+    std::make_heap(anytime_open.begin(), anytime_open.end(), anytime_comparator);
+
+    auto current_open_size = [&]() -> size_t {
+        return anytime_open_active_ ? anytime_open.size() : lex_open.size();
+    };
+
+    CostVec<N> start_g{};
+    start_g.fill(0);
+    Label<N>* start_label = arena_.create(start_node, start_g, heuristic_(start_node));
+    lex_open.push_back(start_label);
+    std::push_heap(lex_open.begin(), lex_open.end(), lex_comparator);
+    num_generation++;
+
+    ThreadLocalSink* sink = nullptr;
+    if constexpr (EnableMetrics) {
+        sink = &benchmark_recorder().main_thread_sink();
+        sink->on_label_generated(current_open_size(), arena_.allocated());
+    }
+
+    double next_trace_sample_sec = std::numeric_limits<double>::infinity();
+    double trace_interval_sec = 0.0;
+    if constexpr (EnableMetrics) {
+        trace_interval_sec = static_cast<double>(benchmark_trace_interval_ms()) / 1000.0;
+        if (trace_interval_sec > 0.0) {
+            next_trace_sample_sec = trace_interval_sec;
+        }
+    }
+
+    while (!lex_open.empty() || !anytime_open.empty()) {
+        double elapsed_sec = elapsed_seconds();
+        if (elapsed_sec > time_limit) {
+            rebuild_solutions_from_exact_target_frontier();
+            if constexpr (EnableMetrics) {
+                set_benchmark_status(RunStatus::timeout);
+            }
+            return;
+        }
+
+        if constexpr (EnableMetrics) {
+            if (trace_interval_sec > 0.0 && !target_frontier_exact_.empty() && elapsed_sec >= next_trace_sample_sec) {
+                benchmark_recorder().on_target_frontier_changed(target_frontier_export_cache(), "interval_sample");
+                next_trace_sample_sec += trace_interval_sec;
+            }
+        }
+
+        maybe_run_deferred_seed_burst<EnableMetrics>(time_limit, elapsed_sec, local_start_time, lex_open, anytime_open);
+
+        Label<N>* curr = nullptr;
+        if (anytime_open_active_) {
+            if (!pop_anytime_open(anytime_open, curr)) {
+                break;
+            }
+        } else {
+            if (lex_open.empty()) {
+                break;
+            }
+            std::pop_heap(lex_open.begin(), lex_open.end(), lex_comparator);
+            curr = lex_open.back();
+            lex_open.pop_back();
+        }
+
+        if constexpr (EnableMetrics) {
+            sink->observe_open_size(current_open_size());
+        }
+
+        const CostVec<N-1> curr_truncated = truncate<N>(curr->f);
+        if (curr->should_check_sol) {
+            if constexpr (EnableMetrics) {
+                benchmark_recorder().on_frontier_check_target();
+            }
+            if (target_dominated(curr->f)) {
+                if constexpr (EnableMetrics) {
+                    sink->on_pruned_by_target();
+                }
+                continue;
+            }
+        }
+
+        if (curr->node != target_node) {
+            if constexpr (EnableMetrics) {
+                benchmark_recorder().on_frontier_check_node();
+            }
+            if (!gcl_.try_insert_or_prune(curr->node, curr_truncated)) {
+                if constexpr (EnableMetrics) {
+                    sink->on_pruned_by_node();
+                }
+                continue;
+            }
+
+            if constexpr (EnableMetrics) {
+                benchmark_recorder().on_frontier_update();
+            }
+        }
+
+        if (curr->node == target_node) {
+            if constexpr (EnableMetrics) {
+                sink->on_target_hit_raw();
+            }
+
+            const AcceptTargetResult accept_result = accept_target(curr->f, elapsed_sec);
+            if (accept_result.accepted) {
+                if constexpr (EnableMetrics) {
+                    benchmark_recorder().on_target_frontier_changed(target_frontier_export_cache(), "target_accept");
+                }
+            }
+            if (accept_result.first_incumbent) {
+                activate_anytime_open(lex_open, anytime_open);
+            }
+            continue;
+        }
+
+        num_expansion++;
+        if constexpr (EnableMetrics) {
+            sink->on_label_expanded(current_open_size(), arena_.allocated());
+        }
+
+        const CostVec<N>& curr_h = heuristic_(curr->node);
+        CostVec<N> curr_g{};
+        for (int idx = 0; idx < N; idx++) {
+            curr_g[idx] = curr->f[idx] - curr_h[idx];
+        }
+
+        const std::vector<Edge>& outgoing_edges = graph[curr->node];
+        for (const auto& edge : outgoing_edges) {
+            const size_t succ_node = edge.tail;
+            const CostVec<N>& succ_h = heuristic_(succ_node);
+            CostVec<N> succ_f{};
+            for (int idx = 0; idx < N; idx++) {
+                succ_f[idx] = curr_g[idx] + edge.cost[idx] + succ_h[idx];
+            }
+
+            const bool should_check_sol = succ_f != curr->f;
+            const CostVec<N-1> succ_truncated = truncate<N>(succ_f);
+
+            if (should_check_sol) {
+                if constexpr (EnableMetrics) {
+                    benchmark_recorder().on_frontier_check_target();
+                }
+                if (target_dominated(succ_f)) {
+                    if constexpr (EnableMetrics) {
+                        sink->on_pruned_by_target();
+                    }
+                    continue;
+                }
+            }
+
+            if (succ_node != target_node) {
+                if constexpr (EnableMetrics) {
+                    benchmark_recorder().on_frontier_check_node();
+                }
+                if (gcl_.dominated(succ_node, succ_truncated)) {
+                    if constexpr (EnableMetrics) {
+                        sink->on_pruned_by_node();
+                    }
+                    continue;
+                }
+            }
+
+            Label<N>* succ = arena_.create(succ_node, succ_f);
+            succ->should_check_sol = should_check_sol;
+
+            if (anytime_open_active_) {
+                anytime_open.push_back(make_open_entry(succ));
+                std::push_heap(anytime_open.begin(), anytime_open.end(), anytime_comparator);
+            } else {
+                lex_open.push_back(succ);
+                std::push_heap(lex_open.begin(), lex_open.end(), lex_comparator);
+            }
+
+            num_generation++;
+            if constexpr (EnableMetrics) {
+                sink->on_label_generated(current_open_size(), arena_.allocated());
+            }
+        }
+    }
+
+    rebuild_solutions_from_exact_target_frontier();
+    if constexpr (EnableMetrics) {
+        set_benchmark_status(RunStatus::completed);
+    }
+}
+
+template class LTMOA_array_superfast_anytime<2>;
+template class LTMOA_array_superfast_anytime<3>;
+template class LTMOA_array_superfast_anytime<4>;
+template class LTMOA_array_superfast_anytime<5>;
+
+std::shared_ptr<AbstractSolver> get_LTMOA_array_superfast_anytime_solver(
+    AdjacencyMatrix &graph, AdjacencyMatrix &inv_graph,
+    size_t start_node, size_t target_node
+) {
+    const int num_obj = graph.get_num_obj();
+    if (num_obj == 2) {
+        return std::make_shared<LTMOA_array_superfast_anytime<2>>(graph, inv_graph, start_node, target_node);
+    } else if (num_obj == 3) {
+        return std::make_shared<LTMOA_array_superfast_anytime<3>>(graph, inv_graph, start_node, target_node);
+    } else if (num_obj == 4) {
+        return std::make_shared<LTMOA_array_superfast_anytime<4>>(graph, inv_graph, start_node, target_node);
+    } else if (num_obj == 5) {
+        return std::make_shared<LTMOA_array_superfast_anytime<5>>(graph, inv_graph, start_node, target_node);
+    }
+    return nullptr;
+}
