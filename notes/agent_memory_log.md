@@ -160,3 +160,97 @@ Recommended entry format:
 - Do not repeat blindly:
   - `SOPMOA` thread validation now intentionally caps requested `13` threads down to `12`; older CLI smoke expectations are stale
   - `SOPMOA_relaxed_t4` in `correctness_harness` is timing-sensitive under `ctest` capture, so exact-frontier equality should not be reintroduced there without first fixing the underlying solver nondeterminism
+
+## 2026-04-12
+
+### Repo-local skill install: `mosp-cpp-performance-engineer`
+- Task: install the user-provided `skill.zip` into this repository as a repo-local skill instead of depending on the machine-global copy.
+- Files touched: `skills/mosp-cpp-performance-engineer/SKILL.md`, `skills/mosp-cpp-performance-engineer/references/benchmarking-playbook.md`, `skills/mosp-cpp-performance-engineer/references/report-template.md`, `skills/mosp-cpp-performance-engineer/agents/openai.yaml`
+- Outcome: the skill was vendored into the repo under `skills/mosp-cpp-performance-engineer/`; a global copy already existed under `~/.codex/skills`, but the repo now carries its own copy.
+- Evidence:
+  - source archive: `/Users/macbook/Downloads/skill.zip`
+  - installed files present under `skills/mosp-cpp-performance-engineer/`
+- Do not repeat blindly:
+  - do not assume the repo-local copy and the global `~/.codex/skills` copy will stay in sync automatically
+  - prefer updating one source of truth intentionally if the skill content changes later
+
+### Larger NYC parallel benchmark rerun
+- Task: read the archived NYC notes, rerun a larger `SOPMOA_relaxed` vs `LTMOA_parallel` benchmark on the same `88959 -> 96072` query, and preserve the results in repo-local notes.
+- Files touched: `bench/manifests/query_sets/nyc_88959_96072.json`, `bench/configs/nyc_parallel_timecap_large.yaml`, `notes/benchmarks/2026-04-12-nyc-parallel-large/nyc_parallel_2thread_5x.csv`, `notes/benchmarks/2026-04-12-nyc-parallel-large/README.md`
+- Outcome: the stable summary-only rerun completed `5` repeats at budgets `0.5/1.0/2.0/5.0` and showed a much stronger anytime frontier advantage for `LTMOA_parallel` than the 2026-04-11 archive on the same query, while runtime stayed near parity and first-solution timing remained slightly worse for `LTMOA_parallel`.
+- Evidence:
+  - verification passed before the sweep:
+    - `ctest --test-dir Release --output-on-failure -R 'benchmark_metrics_smoke|correctness_harness'`
+    - `./Release/ltmoa_frontier_regression`
+  - raw repo-local CSV: `notes/benchmarks/2026-04-12-nyc-parallel-large/nyc_parallel_2thread_5x.csv`
+  - median frontier sizes:
+    - `0.5s`: `SOPMOA_relaxed=243`, `LTMOA_parallel=320`
+    - `1.0s`: `SOPMOA_relaxed=306`, `LTMOA_parallel=461`
+    - `2.0s`: `SOPMOA_relaxed=376`, `LTMOA_parallel=646`
+    - `5.0s`: `SOPMOA_relaxed=511`, `LTMOA_parallel=972`
+- Do not repeat blindly:
+  - do not compare these numbers to the 2026-04-11 archive without stating the date and code-state difference explicitly
+  - do not treat the config-runner path as stable evidence for `SOPMOA_relaxed` on this query until the post-run hang is fixed
+
+### Config-runner instability on `SOPMOA_relaxed`
+- Task: try the same larger NYC comparison through the manifest/config benchmark runner before falling back to manual commands.
+- Files touched: `bench/results/nyc_parallel_timecap_large_20260412/summary.csv`, `bench/results/nyc_parallel_timecap_large_20260412/run_results.json`, `bench/results/nyc_parallel_timecap_large_20260412/resolved_config.json`
+- Outcome: the run had to be interrupted because `SOPMOA_relaxed` intermittently printed its end-of-run stats and then failed to return control to the Python runner, which left placeholder wall-timeout rows with `exit_code = -15`.
+- Evidence:
+  - partial suite summary exists under `bench/results/nyc_parallel_timecap_large_20260412/summary.csv`
+  - interrupted partial status count before fallback:
+    - `SOPMOA_relaxed`, `0.5s`, `timeout`, `exit_code=-15`: `3`
+    - `SOPMOA_relaxed`, `0.5s`, `timeout`, `exit_code=0`: `2`
+    - `SOPMOA_relaxed`, `1.0s`, `timeout`, `exit_code=-15`: `3`
+- Do not repeat blindly:
+  - do not assume the benchmark runner’s wall-timeout placeholders are measuring solver search time here; some rows reflect an exit/handover hang after normal solver stdout
+  - use the stable summary-only CLI loop for this exact query until the runner interaction is debugged
+
+### PMR allocator pass for LTMOA solvers
+- Task: replace hot per-label and scratch allocations in `LTMOA_array_superfast` and `LTMOA_parallel` with PMR-backed arenas and pools, then rerun focused NYC benchmarks.
+- Files touched: `inc/utils/label_arena.h`, `inc/algorithms/ltmoa_array_superfast.h`, `src/algorithms/ltmoa_array_superfast.cpp`, `inc/algorithms/ltmoa_parallel.h`, `src/algorithms/ltmoa_parallel.cpp`, `bench/configs/nyc_ltmoa_array_pmr.yaml`, `bench/configs/nyc_ltmoa_parallel_pmr.yaml`, `notes/benchmarks/2026-04-12-pmr-allocators/README.md`, `notes/benchmarks/2026-04-12-pmr-allocators/nyc_ltmoa_array_pmr_3x_summary.csv`, `notes/benchmarks/2026-04-12-pmr-allocators/nyc_ltmoa_parallel_pmr_5x_summary.csv`
+- Outcome: `LTMOA_array_superfast` now allocates labels from a per-solve monotonic arena and uses PMR scratch containers; `LTMOA_parallel` now uses private PMR pools per worker and a synchronized PMR pool for published snapshots. The post-change benchmark kept wall-clock runtime flat while improving the serial anytime frontier materially, but the parallel anytime frontier did not improve relative to the earlier 2-thread archive. In practice this was a real improvement for the serial solver, but not a clear performance win for the parallel solver on the archived NYC query.
+- Evidence:
+  - verification passed after the patch:
+    - `cmake --build Release -j4`
+    - `ctest --test-dir Release --output-on-failure -R 'benchmark_metrics_smoke|correctness_harness'`
+    - `./Release/ltmoa_frontier_regression`
+  - serial medians from `notes/benchmarks/2026-04-12-pmr-allocators/nyc_ltmoa_array_pmr_3x_summary.csv`:
+    - `0.5s`: frontier `425 -> 514`, first solution `1.991ms -> 1.212ms`
+    - `1.0s`: frontier `558 -> 743`, first solution `1.917ms -> 1.634ms`
+    - `2.0s`: frontier `804 -> 1004`, first solution `1.947ms -> 1.363ms`
+    - `5.0s`: frontier `1050 -> 1371`, first solution `1.808ms -> 1.378ms`
+  - parallel medians from `notes/benchmarks/2026-04-12-pmr-allocators/nyc_ltmoa_parallel_pmr_5x_summary.csv` compared to `notes/benchmarks/2026-04-12-nyc-parallel-large/nyc_parallel_2thread_5x.csv`:
+    - runtime stayed within `0.25%` of the earlier archive at every budget
+    - frontier ratio new/old: `1.000x`, `0.974x`, `0.957x`, `0.879x`
+  - serial runtime ratio `LTMOA_array_superfast / LTMOA_array` stayed near `1.0x`:
+    - `0.5s`: `0.9980x`
+    - `1.0s`: `1.0001x`
+    - `2.0s`: `1.0002x`
+    - `5.0s`: `0.9994x`
+  - serial RSS ratio `LTMOA_array_superfast / LTMOA_array`:
+    - `0.5s`: `0.8858x`
+    - `1.0s`: `0.9250x`
+    - `2.0s`: `0.9813x`
+    - `5.0s`: `1.0572x`
+  - parallel runtime ratio new/old stayed near `1.0x`:
+    - `0.5s`: `0.9975x`
+    - `1.0s`: `0.9998x`
+    - `2.0s`: `1.0000x`
+    - `5.0s`: `0.9995x`
+  - the old `LTMOA_parallel` archive does not expose `peak_rss_mb`, so there is no direct before/after RSS baseline for the parallel solver
+- Do not repeat blindly:
+  - do not read the runner banner `Completed 0/N runs` as a failure for time-capped suites; these rows were canonical `status=timeout`, `exit_code=0` anytime outputs
+  - do not assume allocator changes alone will improve `LTMOA_parallel` anytime quality; the current evidence says they mostly stabilized memory behavior without raising the frontier on this query
+
+### PMR before/after findings persisted into notes
+- Task: make the PMR allocator conclusions easier to recover later by writing the practical memory/runtime interpretation into the benchmark archive, repo memory, and roadmap.
+- Files touched: `notes/benchmarks/2026-04-12-pmr-allocators/README.md`, `notes/agent_memory_log.md`, `notes/roadmap.md`
+- Outcome: the repo notes now explicitly preserve that PMR was a real before/after improvement for `LTMOA_array_superfast`, while `LTMOA_parallel` stayed runtime-neutral and cannot claim a measured memory win against the older archive.
+- Evidence:
+  - benchmark note now includes concrete runtime, RSS, frontier, and first-solution ratios near the top
+  - the PMR experiment memory entry now records the serial RSS ratios `0.8858x`, `0.9250x`, `0.9813x`, `1.0572x`
+  - the roadmap now records that PMR alone should not be assumed to be a sufficient optimization direction for `LTMOA_parallel`
+- Do not repeat blindly:
+  - do not force future readers to reconstruct the PMR outcome from raw CSVs when the practical takeaway can be preserved directly in notes
+  - do not describe the parallel PMR pass as a memory improvement without a matching old/new RSS baseline

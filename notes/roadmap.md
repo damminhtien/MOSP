@@ -65,3 +65,41 @@ Recommended entry format:
 - Idea: reproduce and fix the exact-frontier mismatch for `SOPMOA_relaxed_t4` on the anti-correlated hard synthetic case under `ctest` output capture, then restore a stronger correctness assertion if the solver can be made stable.
 - Why: the merged harness is green again, but one assertion had to be relaxed because the 4-thread relaxed solver is timing-sensitive in the current implementation.
 - Evidence / related notes: `notes/agent_memory_log.md`, `tests/correctness_harness.cpp`
+
+## 2026-04-12
+
+### Decide whether repo-local skills should become the preferred project convention
+- Status: `hold`
+- Idea: if more skills are vendored into this repository, standardize whether they should live under `skills/` and whether a short repo note should describe how they relate to `~/.codex/skills`.
+- Why: this install added a repo-local copy of `mosp-cpp-performance-engineer`, but there is already a global copy on the machine, so future updates could drift.
+- Evidence / related notes: `notes/agent_memory_log.md`, `skills/mosp-cpp-performance-engineer/`
+
+### Debug the config-runner exit hang for `SOPMOA_relaxed`
+- Status: `next`
+- Idea: reproduce why `SOPMOA_relaxed` sometimes prints normal end-of-run stats yet does not hand control back to `bench/scripts/run_benchmark.py` on the NYC `88959 -> 96072` query.
+- Why: the manual summary-only benchmark path is currently stable, but the config-driven benchmark path produced wall-timeout placeholders with `exit_code=-15`, which makes the suite summary unreliable.
+- Evidence / related notes: `notes/agent_memory_log.md`, `bench/results/nyc_parallel_timecap_large_20260412/summary.csv`, `notes/benchmarks/2026-04-12-nyc-parallel-large/README.md`
+
+### Run a scaling follow-up for `LTMOA_parallel` on the stable NYC query
+- Status: `investigate`
+- Idea: extend the current `88959 -> 96072` benchmark to `1/2/4` threads once the benchmark path is stable enough to produce clean repeated rows.
+- Why: the new 2-thread rerun is the strongest current positive signal for `LTMOA_parallel`, but it still leaves the scaling question open.
+- Evidence / related notes: `notes/benchmarks/2026-04-12-nyc-parallel-large/README.md`, `notes/agent_memory_log.md`
+
+### Investigate why PMR helps `LTMOA_array_superfast` much more than `LTMOA_parallel`
+- Status: `investigate`
+- Idea: profile `LTMOA_parallel` on the NYC `88959 -> 96072` query to separate allocator wins from remaining bottlenecks such as shard contention, duplicate work, and target-frontier publication cost.
+- Why: the PMR rewrite preserved runtime but did not improve the 2-thread anytime frontier relative to the earlier archive, while the serial `LTMOA_array_superfast` comparison improved strongly.
+- Evidence / related notes: `notes/benchmarks/2026-04-12-pmr-allocators/README.md`, `notes/agent_memory_log.md`
+
+### Do not treat PMR alone as the next parallel optimization thesis
+- Status: `hold`
+- Idea: do not assume more allocator-only work will be a sufficient optimization direction for `LTMOA_parallel`; future parallel tuning should focus on contention, duplicate work, and target-frontier publication overhead first.
+- Why: the PMR rewrite kept `LTMOA_parallel` runtime near `1.0x` of the earlier archive but did not improve the archived `2`-thread anytime frontier on the NYC `88959 -> 96072` query.
+- Evidence / related notes: `notes/benchmarks/2026-04-12-pmr-allocators/README.md`, `notes/agent_memory_log.md`
+
+### Fix the runner completion banner for time-capped suites
+- Status: `next`
+- Idea: update `bench/scripts/run_benchmark.py` so summary reporting distinguishes clean anytime `status=timeout` rows from real failed runs.
+- Why: both new PMR suites finished with canonical summary rows and `exit_code=0`, but the runner still printed `Completed 0/N runs`, which is misleading during experiment triage.
+- Evidence / related notes: `notes/benchmarks/2026-04-12-pmr-allocators/README.md`, `bench/results/nyc_ltmoa_array_pmr_20260412/summary.csv`, `bench/results/nyc_ltmoa_parallel_pmr_20260412/summary.csv`
