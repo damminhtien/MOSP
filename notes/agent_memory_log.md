@@ -254,3 +254,32 @@ Recommended entry format:
 - Do not repeat blindly:
   - do not force future readers to reconstruct the PMR outcome from raw CSVs when the practical takeaway can be preserved directly in notes
   - do not describe the parallel PMR pass as a memory improvement without a matching old/new RSS baseline
+
+### MOSP / MOA* paper checklist archived as a roadmap note
+- Task: preserve the research-ordered MOSP / MOA* paper checklist as a repo note and connect it to the forward roadmap so papers can be turned into implementation work gradually.
+- Files touched: `notes/paper_reading_roadmap_mosp_moa.md`, `notes/roadmap.md`
+- Outcome: the literature checklist now exists as a standalone note grouped by exact-core, survey/theory, OR-nearby, engineering, approximate, dynamic, and background papers, with a short recommended reading sequence for future implementation passes.
+- Evidence:
+  - canonical note: `notes/paper_reading_roadmap_mosp_moa.md`
+  - roadmap entry now points to that note as the phased literature-to-implementation backlog
+- Do not repeat blindly:
+  - do not leave large reading lists only in transient chat history when they are intended to guide future repo work
+  - do not mix exact-core MOSP papers with approximate or MAPF extensions when deciding the next solver implementation target
+
+### Runner clean-timeout accounting and `SOPMOA_relaxed` finalization stabilization
+- Task: fix the benchmark runner so clean time-capped suites are not reported as `0/N completed`, and finish the previously left-dirty `SOPMOA_relaxed` / `benchmark_metrics` changes that were intended to avoid expensive post-run trace finalization.
+- Files touched: `bench/scripts/run_benchmark.py`, `bench/README.md`, `tests/benchmark_runner_smoke.py`, `tests/benchmark_metrics_smoke.cpp`, `CMakeLists.txt`, `inc/algorithms/sopmoa_relaxed.h`, `src/algorithms/sopmoa_relaxed.cpp`, `inc/utils/benchmark_metrics.h`, `src/utils/benchmark_metrics.cpp`, `notes/agent_memory_log.md`, `notes/roadmap.md`
+- Outcome: the runner now reports clean solver-side budget timeouts as successful runs and breaks out runner-driven timeouts separately; `SOPMOA_relaxed` now keeps a private exact target frontier for trace/finalization and can emit counters-only anytime events when full snapshot capture is intentionally skipped. The previously untouched `SOPMOA_relaxed` / `benchmark_metrics` work is now integrated and validated instead of being left as unrelated dirty code.
+- Evidence:
+  - targeted tests passed after the patch:
+    - `ctest --test-dir Release --output-on-failure -R 'benchmark_metrics_smoke|correctness_harness|ltmoa_frontier_regression|cli_validation_smoke|benchmark_runner_smoke'`
+  - runner smoke now expects:
+    - `Successful runs: 1/1`
+    - `Run status counts: completed=0, timed_out_cleanly=1, skipped=0, crash=0`
+  - direct probe of the formerly problematic path succeeded:
+    - config-driven `SOPMOA_relaxed`, `2` threads, query `88959 -> 96072`, budget `0.5s`, `export_frontier=true`, `export_trace=true`, `trace_interval_ms=0`
+    - probe result: `returncode=0`, `process_timed_out=false`, `used_solver_summary=true`, suite status `timeout`
+  - runner robustness also improved for absolute config paths outside the repo by falling back to an absolute `config_path` in `resolved_config.json`
+- Do not repeat blindly:
+  - do not treat every suite-level `timeout` as a runner failure; clean solver-side budget timeouts are now a first-class successful outcome in runner console summaries
+  - do not reintroduce full frontier snapshot capture on every `SOPMOA_relaxed` target acceptance when `trace_interval_ms=0`; that was the expensive path behind the earlier handoff/finalization issue

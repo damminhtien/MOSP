@@ -68,6 +68,12 @@ Recommended entry format:
 
 ## 2026-04-12
 
+### Turn the MOSP / MOA* paper checklist into a phased implementation backlog
+- Status: `next`
+- Idea: use `notes/paper_reading_roadmap_mosp_moa.md` as the canonical reading roadmap, then convert one paper cluster at a time into concrete repo changes: exact-core papers first, surveys/theory second, then OR-nearby and engineering papers as needed.
+- Why: the literature list is now large enough that ad hoc reading will waste time; the repo needs a stable “read first, implement later” sequence aligned with the actual MOSP research arc.
+- Evidence / related notes: `notes/paper_reading_roadmap_mosp_moa.md`, `skills/mosp-cpp-performance-engineer/SKILL.md`
+
 ### Decide whether repo-local skills should become the preferred project convention
 - Status: `hold`
 - Idea: if more skills are vendored into this repository, standardize whether they should live under `skills/` and whether a short repo note should describe how they relate to `~/.codex/skills`.
@@ -103,3 +109,9 @@ Recommended entry format:
 - Idea: update `bench/scripts/run_benchmark.py` so summary reporting distinguishes clean anytime `status=timeout` rows from real failed runs.
 - Why: both new PMR suites finished with canonical summary rows and `exit_code=0`, but the runner still printed `Completed 0/N runs`, which is misleading during experiment triage.
 - Evidence / related notes: `notes/benchmarks/2026-04-12-pmr-allocators/README.md`, `bench/results/nyc_ltmoa_array_pmr_20260412/summary.csv`, `bench/results/nyc_ltmoa_parallel_pmr_20260412/summary.csv`
+
+### Add mixed-status runner coverage if status logic changes again
+- Status: `hold`
+- Idea: if the runner status accounting changes again, add one more smoke case that mixes a clean solver timeout with a true runner timeout or crash so the console summary breakdown stays trustworthy.
+- Why: the clean-timeout banner bug is now fixed, but the next likely regression surface is mixed suites where solver-level `timeout` and runner-level timeout need to stay visually distinct.
+- Evidence / related notes: `tests/benchmark_runner_smoke.py`, `notes/agent_memory_log.md`
