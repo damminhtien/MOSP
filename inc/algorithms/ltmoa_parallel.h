@@ -2,6 +2,7 @@
 #define ALGORITHM_LTMOA_PARALLEL
 
 #include <atomic>
+#include <memory_resource>
 #include <mutex>
 #include <random>
 #include <thread>
@@ -34,7 +35,7 @@ private:
     static constexpr size_t REMOTE_BATCH_SIZE = 16;
     static constexpr size_t INBOX_DRAIN_LIMIT = 128;
     static constexpr size_t STEAL_K = 2;
-    using TargetSnapshot = std::vector<CostVec<N>>;
+    using TargetSnapshot = std::pmr::vector<CostVec<N>>;
 
     struct InboxBatch {
         std::array<Label<N>*, REMOTE_BATCH_SIZE> labels{};
@@ -42,13 +43,36 @@ private:
     };
 
     struct WorkerState {
-        std::vector<Label<N>*> heap;
+        std::pmr::unsynchronized_pool_resource label_pool;
+        std::pmr::unsynchronized_pool_resource scratch_pool;
+        std::pmr::vector<Label<N>*> heap;
         tbb::concurrent_queue<InboxBatch> inbox;
-        std::vector<InboxBatch> pending_outboxes;
+        std::pmr::vector<InboxBatch> pending_outboxes;
         std::mutex heap_lock;
         // A single thread may process a shard at a time, even when work is stolen.
         std::atomic<bool> processing_active{false};
-        LabelArena<N> arena;
+        PmrLabelArena<N> arena;
+
+        WorkerState()
+        : heap(&scratch_pool),
+        pending_outboxes(&scratch_pool),
+        arena(label_pool) {}
+
+        void reset(size_t worker_count) {
+            std::destroy_at(std::addressof(heap));
+            std::destroy_at(std::addressof(pending_outboxes));
+            scratch_pool.release();
+            label_pool.release();
+            new (&heap) std::pmr::vector<Label<N>*>(&scratch_pool);
+            new (&pending_outboxes) std::pmr::vector<InboxBatch>(&scratch_pool);
+            heap.reserve(256);
+            pending_outboxes.resize(worker_count);
+            arena.clear();
+            processing_active.store(false, std::memory_order_release);
+
+            InboxBatch stale_batch;
+            while (inbox.try_pop(stale_batch)) {}
+        }
     };
 
     void sync_benchmark_recorder() override;
@@ -98,6 +122,7 @@ private:
     mutable std::mutex benchmark_trace_lock_;
     mutable std::mutex target_frontier_lock_;
     std::vector<FrontierPoint> target_frontier_exact_;
+    std::pmr::synchronized_pool_resource snapshot_resource_;
     std::shared_ptr<const TargetSnapshot> published_target_snapshot_;
 };
 

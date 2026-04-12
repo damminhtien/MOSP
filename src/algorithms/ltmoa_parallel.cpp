@@ -28,8 +28,7 @@ void LTMOA_parallel<N>::initialize_workers() {
     workers_.reserve(num_threads_);
     for (int idx = 0; idx < num_threads_; idx++) {
         workers_.push_back(std::make_unique<WorkerState>());
-        workers_.back()->heap.reserve(256);
-        workers_.back()->pending_outboxes.resize(num_threads_);
+        workers_.back()->reset(static_cast<size_t>(num_threads_));
     }
 }
 
@@ -46,6 +45,7 @@ void LTMOA_parallel<N>::solve(double time_limit) {
         std::shared_ptr<const TargetSnapshot>(),
         std::memory_order_release
     );
+    snapshot_resource_.release();
     gcl_.clear();
 
     inflight_labels_.store(0, std::memory_order_relaxed);
@@ -65,15 +65,7 @@ void LTMOA_parallel<N>::solve(double time_limit) {
     peak_live_labels_.store(0, std::memory_order_relaxed);
 
     for (auto& worker : workers_) {
-        worker->arena.clear();
-        worker->heap.clear();
-        worker->processing_active.store(false, std::memory_order_release);
-        for (auto& pending : worker->pending_outboxes) {
-            pending.size = 0;
-        }
-
-        InboxBatch stale_batch;
-        while (worker->inbox.try_pop(stale_batch)) {}
+        worker->reset(static_cast<size_t>(num_threads_));
     }
 
     search_start_ = std::chrono::steady_clock::now();
@@ -322,7 +314,7 @@ void LTMOA_parallel<N>::flush_all_outboxes(size_t worker_id) {
 template<int N>
 void LTMOA_parallel<N>::drain_inbox(size_t worker_id, size_t limit) {
     auto& worker = *workers_[worker_id];
-    std::vector<Label<N>*> inbox_labels;
+    std::pmr::vector<Label<N>*> inbox_labels(&worker.scratch_pool);
     inbox_labels.reserve(limit);
 
     InboxBatch batch;
@@ -441,7 +433,9 @@ bool LTMOA_parallel<N>::accept_target(const CostVec<N>& cost, double elapsed_sec
     if (!insert_nondominated_frontier_point(target_frontier_exact_, point)) {
         return false;
     }
-    auto snapshot = std::make_shared<TargetSnapshot>();
+    auto snapshot = std::make_shared<TargetSnapshot>(
+        typename TargetSnapshot::allocator_type(&snapshot_resource_)
+    );
     snapshot->reserve(target_frontier_exact_.size());
     for (const auto& existing : target_frontier_exact_) {
         CostVec<N> existing_cost{};

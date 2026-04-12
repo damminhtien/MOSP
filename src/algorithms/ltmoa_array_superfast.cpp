@@ -246,11 +246,12 @@ bool LTMOA_array_superfast<N>::run_scalar_seed(
     }
     warm_start_stamp_++;
 
+    std::pmr::vector<ScalarWarmStartEntry> open_storage(&scratch_resource_);
     std::priority_queue<
         ScalarWarmStartEntry,
-        std::vector<ScalarWarmStartEntry>,
+        std::pmr::vector<ScalarWarmStartEntry>,
         typename ScalarWarmStartEntry::larger_for_pq
-    > open;
+    > open(typename ScalarWarmStartEntry::larger_for_pq(), std::move(open_storage));
 
     CostVec<N> start_g{};
     start_g.fill(0);
@@ -416,6 +417,17 @@ void LTMOA_array_superfast<N>::rebuild_solutions_from_exact_target_frontier() {
 }
 
 template<int N>
+void LTMOA_array_superfast<N>::reset_solve_storage() {
+    label_resource_.release();
+    arena_.clear();
+
+    using PoppedLabelSet = std::pmr::unordered_set<Label<N>*>;
+    std::destroy_at(std::addressof(popped_labels_));
+    scratch_resource_.release();
+    new (&popped_labels_) PoppedLabelSet(&scratch_resource_);
+}
+
+template<int N>
 typename LTMOA_array_superfast<N>::AnytimeEntry
 LTMOA_array_superfast<N>::make_anytime_entry(Label<N>* label) const {
     AnytimeEntry entry;
@@ -453,7 +465,7 @@ LTMOA_array_superfast<N>::make_anytime_entry(Label<N>* label) const {
 }
 
 template<int N>
-bool LTMOA_array_superfast<N>::pop_lex_open(std::vector<Label<N>*>& lex_open, Label<N>*& label) {
+bool LTMOA_array_superfast<N>::pop_lex_open(std::pmr::vector<Label<N>*>& lex_open, Label<N>*& label) {
     typename Label<N>::lex_larger_for_PQ comparator;
     while (!lex_open.empty()) {
         std::pop_heap(lex_open.begin(), lex_open.end(), comparator);
@@ -469,7 +481,7 @@ bool LTMOA_array_superfast<N>::pop_lex_open(std::vector<Label<N>*>& lex_open, La
 }
 
 template<int N>
-bool LTMOA_array_superfast<N>::pop_anytime_open(std::vector<AnytimeEntry>& anytime_open, Label<N>*& label) {
+bool LTMOA_array_superfast<N>::pop_anytime_open(std::pmr::vector<AnytimeEntry>& anytime_open, Label<N>*& label) {
     typename AnytimeEntry::larger_for_pq comparator;
     while (!anytime_open.empty()) {
         std::pop_heap(anytime_open.begin(), anytime_open.end(), comparator);
@@ -507,9 +519,8 @@ void LTMOA_array_superfast<N>::solve_impl(double time_limit) {
     target_component_min_dirty_ = false;
     num_generation = 0;
     num_expansion = 0;
-    arena_.clear();
+    reset_solve_storage();
     gcl_.clear();
-    popped_labels_.clear();
     target_revision_ = 0;
     anytime_open_active_ = false;
     deferred_seed_attempted_ = false;
@@ -525,8 +536,8 @@ void LTMOA_array_superfast<N>::solve_impl(double time_limit) {
 
     typename Label<N>::lex_larger_for_PQ lex_comparator;
     typename AnytimeEntry::larger_for_pq anytime_comparator;
-    std::vector<Label<N>*> lex_open;
-    std::vector<AnytimeEntry> anytime_open;
+    std::pmr::vector<Label<N>*> lex_open(&scratch_resource_);
+    std::pmr::vector<AnytimeEntry> anytime_open(&scratch_resource_);
     std::make_heap(lex_open.begin(), lex_open.end(), lex_comparator);
     std::make_heap(anytime_open.begin(), anytime_open.end(), anytime_comparator);
 

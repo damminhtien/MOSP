@@ -9,6 +9,7 @@
 #include "../utils/label_arena.h"
 #include "abstract_solver.h"
 #include "gcl/gcl_fast_array.h"
+#include <memory_resource>
 #include <unordered_set>
 
 template <int N>
@@ -17,8 +18,11 @@ public:
     LTMOA_array_superfast(AdjacencyMatrix &adj_matrix, AdjacencyMatrix &inv_graph, size_t start_node, size_t target_node)
     : AbstractSolver(adj_matrix, start_node, target_node),
     heuristic_(Heuristic<N>(target_node, inv_graph)),
+    label_resource_(label_resource_buffer_.data(), label_resource_buffer_.size()),
+    arena_(label_resource_),
     gcl_(FastGclArray<N-1>(adj_matrix.get_num_node())),
-    warm_start_states_(adj_matrix.get_num_node()) {
+    warm_start_states_(adj_matrix.get_num_node()),
+    popped_labels_(&scratch_resource_) {
         target_component_min_.fill(MAX_COST);
     }
 
@@ -30,6 +34,8 @@ public:
     void solve(double time_limit = std::numeric_limits<double>::infinity()) override;
 
 private:
+    static constexpr size_t LABEL_RESOURCE_INITIAL_BYTES = 4 * 1024 * 1024;
+
     struct ExactTargetPoint {
         CostVec<N> cost{};
         double time_found_sec = -1.0;
@@ -73,6 +79,7 @@ private:
 
     template<bool EnableMetrics>
     void solve_impl(double time_limit);
+    void reset_solve_storage();
     template<bool EnableMetrics>
     void maybe_run_deferred_seed_burst(
         double time_limit,
@@ -92,8 +99,8 @@ private:
     const std::vector<FrontierPoint>& target_frontier_export_cache() const;
     void rebuild_solutions_from_exact_target_frontier();
     AnytimeEntry make_anytime_entry(Label<N>* label) const;
-    bool pop_lex_open(std::vector<Label<N>*>& lex_open, Label<N>*& label);
-    bool pop_anytime_open(std::vector<AnytimeEntry>& anytime_open, Label<N>*& label);
+    bool pop_lex_open(std::pmr::vector<Label<N>*>& lex_open, Label<N>*& label);
+    bool pop_anytime_open(std::pmr::vector<AnytimeEntry>& anytime_open, Label<N>*& label);
     static std::vector<CostVec<N>> build_warm_start_weights();
     static uint64_t guarded_add_u64(uint64_t lhs, uint64_t rhs);
     static uint64_t weighted_dot(const CostVec<N>& weights, const CostVec<N>& values);
@@ -107,11 +114,14 @@ private:
     );
 
     Heuristic<N> heuristic_;
-    LabelArena<N> arena_;
+    std::array<std::byte, LABEL_RESOURCE_INITIAL_BYTES> label_resource_buffer_{};
+    std::pmr::monotonic_buffer_resource label_resource_;
+    std::pmr::unsynchronized_pool_resource scratch_resource_;
+    PmrLabelArena<N> arena_;
     FastGclArray<N-1> gcl_;
     std::vector<ScalarWarmStartState> warm_start_states_;
     uint32_t warm_start_stamp_ = 0;
-    std::unordered_set<Label<N>*> popped_labels_;
+    std::pmr::unordered_set<Label<N>*> popped_labels_;
     uint32_t target_revision_ = 0;
     bool anytime_open_active_ = false;
     bool deferred_seed_attempted_ = false;
