@@ -56,6 +56,7 @@ void SOPMOA_relaxed<N>::solve(double time_limit) {
     total_node_checks = 0;
     total_frontier_check_ns = 0;
     solutions.clear();
+    target_frontier_exact_.clear();
 
     for (auto & worker : workers) {
         worker->heap.clear();
@@ -249,13 +250,45 @@ void SOPMOA_relaxed<N>::process_label(size_t worker_id, Label<N>* curr, double t
 
     if (curr->node == target_node) {
         target_hits_raw_total_.fetch_add(1, std::memory_order_relaxed);
+        std::vector<FrontierPoint> target_snapshot;
+        size_t target_frontier_size = 0;
+        {
+            std::lock_guard<std::mutex> guard(target_frontier_lock);
+            FrontierPoint point;
+            point.cost.assign(curr->f.begin(), curr->f.end());
+            point.time_found_sec = elapsed;
+            insert_nondominated_frontier_point(target_frontier_exact_, point);
+            target_frontier_size = target_frontier_exact_.size();
+
+            if (
+                benchmark_enabled()
+                && benchmark_recorder().trace_details_enabled()
+                && benchmark_trace_interval_ms() > 0
+            ) {
+                target_snapshot = sort_frontier_lexicographically(target_frontier_exact_);
+            }
+        }
         if (benchmark_enabled()) {
             std::lock_guard<std::mutex> guard(benchmark_trace_lock);
-            benchmark_recorder().on_target_frontier_changed(
-                snapshot_frontier_points(target_node),
-                counter_snapshot(),
-                "target_accept"
-            );
+            if (benchmark_recorder().trace_details_enabled()) {
+                const CounterSet counters = counter_snapshot();
+                if (benchmark_trace_interval_ms() == 0) {
+                    benchmark_recorder().record_anytime_event(
+                        elapsed,
+                        target_frontier_size,
+                        counters,
+                        "target_accept"
+                    );
+                } else {
+                    benchmark_recorder().on_target_frontier_changed(
+                        target_snapshot,
+                        counters,
+                        "target_accept"
+                    );
+                }
+            } else {
+                benchmark_recorder().note_first_solution(elapsed);
+            }
         }
         inflight_labels.fetch_sub(1, std::memory_order_acq_rel);
         return;
@@ -445,7 +478,8 @@ bool SOPMOA_relaxed<N>::frontier_update(size_t node, const CostVec<N>& cost, dou
 
 template<int N>
 void SOPMOA_relaxed<N>::collect_final_solutions() {
-    rebuild_solutions_from_frontier(snapshot_frontier_points(target_node));
+    std::lock_guard<std::mutex> guard(target_frontier_lock);
+    rebuild_solutions_from_frontier(sort_frontier_lexicographically(target_frontier_exact_));
 }
 
 template<int N>
@@ -454,7 +488,15 @@ double SOPMOA_relaxed<N>::elapsed_sec() const {
 }
 
 template<int N>
-std::vector<FrontierPoint> SOPMOA_relaxed<N>::snapshot_frontier_points(size_t node) const {
+std::vector<FrontierPoint> SOPMOA_relaxed<N>::snapshot_frontier_points(size_t node, bool normalize_snapshot) const {
+    if (node == target_node) {
+        std::lock_guard<std::mutex> guard(target_frontier_lock);
+        if (!normalize_snapshot) {
+            return sort_frontier_lexicographically(target_frontier_exact_);
+        }
+        return sort_frontier_lexicographically(normalize_frontier(target_frontier_exact_));
+    }
+
     auto snapshot = gcl_ptr->snapshot(node);
     std::vector<FrontierPoint> frontier;
     frontier.reserve(snapshot->size());
@@ -466,6 +508,11 @@ std::vector<FrontierPoint> SOPMOA_relaxed<N>::snapshot_frontier_points(size_t no
         });
     }
 
+    // Gcl_relaxed keeps only live nondominated entries in the published frontier.
+    // Trace capture can therefore skip repeated normalization and only sort.
+    if (!normalize_snapshot) {
+        return sort_frontier_lexicographically(frontier);
+    }
     return sort_frontier_lexicographically(normalize_frontier(frontier));
 }
 
@@ -506,7 +553,7 @@ void SOPMOA_relaxed<N>::maybe_record_interval_sample(double elapsed_sec) {
     next_due = next_trace_sample_ms_.load(std::memory_order_relaxed);
     if (elapsed_ms < next_due || next_due == 0) { return; }
 
-    const std::vector<FrontierPoint> snapshot = snapshot_frontier_points(target_node);
+    const std::vector<FrontierPoint> snapshot = snapshot_frontier_points(target_node, false);
     if (snapshot.empty()) { return; }
 
     next_trace_sample_ms_.store(next_due + interval_ms, std::memory_order_relaxed);

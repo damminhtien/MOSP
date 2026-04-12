@@ -121,6 +121,8 @@ private:
     size_t total_node_checks = 0;
     long long total_frontier_check_ns = 0;
     BenchmarkClock::time_point search_start{};
+    std::vector<FrontierPoint> target_frontier_exact_;
+    mutable std::mutex target_frontier_lock;
     mutable std::mutex benchmark_trace_lock;
 
     inline size_t owner_of(size_t node) const { return node % num_threads; }
@@ -141,13 +143,13 @@ private:
     void observe_peak(std::atomic<uint64_t>& peak, uint64_t value);
     CounterSet counter_snapshot() const;
     void maybe_record_interval_sample(double elapsed_sec);
-    std::vector<FrontierPoint> snapshot_frontier_points(size_t node) const;
+    std::vector<FrontierPoint> snapshot_frontier_points(size_t node, bool normalize_snapshot = true) const;
     void sync_benchmark_recorder() override {
         benchmark_recorder().set_counters(counter_snapshot());
     }
 
     std::vector<FrontierPoint> collect_final_frontier() const override {
-        return snapshot_frontier_points(target_node);
+        return snapshot_frontier_points(target_node, false);
     }
 };
 

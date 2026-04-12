@@ -145,11 +145,16 @@ public:
     // Export a new anytime point when the target frontier changes or interval sampling is due.
     void on_target_frontier_changed(const std::vector<FrontierPoint>& frontier, const char* trigger = "frontier_change");
     void on_target_frontier_changed(const std::vector<FrontierPoint>& frontier, const CounterSet& counters, const char* trigger);
+    // Record a counters-only anytime event when full frontier snapshots are intentionally skipped.
+    void record_anytime_event(double elapsed_sec, size_t frontier_size, const CounterSet& counters, const char* trigger);
     void set_status(RunStatus status);
 
     bool has_status() const;
     bool is_configured() const;
     uint64_t trace_interval_ms() const;
+    bool trace_details_enabled() const;
+    // Preserve first-solution timing even when trace export is disabled or snapshot capture is skipped.
+    void note_first_solution(double elapsed_sec);
 
     void set_frontier_artifact_path(const std::filesystem::path& csv_path);
     void set_trace_artifact_path(const std::filesystem::path& csv_path);

@@ -145,6 +145,47 @@ void run_recorder_summary_only_subcase() {
     assert(finalized.anytime_trace.empty());
 }
 
+void run_recorder_counter_only_trace_subcase(const std::filesystem::path& root) {
+    BenchmarkRecorder recorder;
+
+    RunMetrics metadata;
+    metadata.solver_name = "RecorderCounterOnlyTrace";
+    metadata.dataset_id = "unit_dataset";
+    metadata.query_id = "counter_only_trace";
+    metadata.start_node = 1;
+    metadata.target_node = 9;
+    metadata.num_objectives = 2;
+    metadata.threads_requested = 1;
+    metadata.threads_effective = 1;
+    metadata.budget_sec = 1.0;
+
+    recorder.configure(metadata, 0);
+    recorder.set_trace_artifact_path(root / "counter_only_trace.csv");
+
+    CounterSet counters;
+    counters.generated_labels = 7;
+    counters.expanded_labels = 3;
+    counters.pruned_by_target = 1;
+    counters.target_hits_raw = 2;
+
+    recorder.record_anytime_event(0.25, 2, counters, "counter_only_target_accept");
+    recorder.set_status(RunStatus::timeout);
+
+    const std::vector<FrontierPoint> final_frontier = {
+        {{2, 10}, 0.1},
+        {{10, 2}, 0.2},
+    };
+    RunMetrics finalized = recorder.finalize(final_frontier);
+
+    assert(!finalized.completed);
+    assert(finalized.status == RunStatus::timeout);
+    assert(finalized.time_to_first_solution_sec == 0.25);
+    assert(finalized.anytime_trace.size() == 1);
+    assert(finalized.anytime_trace[0].frontier_size == 2);
+    assert(std::isnan(finalized.anytime_trace[0].recall));
+    assert(std::isnan(finalized.anytime_trace[0].hv_ratio));
+}
+
 void run_frontier_size_semantics_subcase() {
     BenchmarkRecorder recorder;
 
@@ -541,6 +582,7 @@ int main() {
 
     run_recorder_subcase(root);
     run_recorder_summary_only_subcase();
+    run_recorder_counter_only_trace_subcase(root);
     run_frontier_size_semantics_subcase();
     run_counter_semantics_solver_subcase();
     run_clock_solver_subcase();

@@ -445,6 +445,34 @@ void BenchmarkRecorder::on_target_frontier_changed(const std::vector<FrontierPoi
     last_trace_time_sec_ = elapsed_sec;
 }
 
+void BenchmarkRecorder::record_anytime_event(double elapsed_sec, size_t frontier_size, const CounterSet& counters, const char* trigger) {
+    if (!configured_) {
+        return;
+    }
+
+    if (metrics_.time_to_first_solution_sec < 0.0) {
+        metrics_.time_to_first_solution_sec = elapsed_sec;
+    }
+
+    if (!capture_trace_details()) {
+        return;
+    }
+
+    AnytimePoint point;
+    point.time_sec = elapsed_sec;
+    point.frontier_size = frontier_size;
+    point.generated_labels = counters.generated_labels;
+    point.expanded_labels = counters.expanded_labels;
+    point.pruned_by_target = counters.pruned_by_target;
+    point.pruned_by_node = counters.pruned_by_node;
+    point.pruned_other = counters.pruned_other;
+    point.target_hits_raw = counters.target_hits_raw;
+    point.trigger = trigger == nullptr ? "frontier_change" : trigger;
+
+    metrics_.anytime_trace.push_back(point);
+    last_trace_time_sec_ = elapsed_sec;
+}
+
 void BenchmarkRecorder::set_status(RunStatus status) {
     metrics_.status = status;
     metrics_.completed = (status == RunStatus::completed);
@@ -463,6 +491,19 @@ uint64_t BenchmarkRecorder::trace_interval_ms() const {
     return trace_interval_ms_;
 }
 
+bool BenchmarkRecorder::trace_details_enabled() const {
+    return capture_trace_details();
+}
+
+void BenchmarkRecorder::note_first_solution(double elapsed_sec) {
+    if (!configured_) {
+        return;
+    }
+    if (metrics_.time_to_first_solution_sec < 0.0) {
+        metrics_.time_to_first_solution_sec = elapsed_sec;
+    }
+}
+
 void BenchmarkRecorder::set_frontier_artifact_path(const std::filesystem::path& csv_path) {
     metrics_.frontier_artifact_path = csv_path.string();
 }
@@ -473,6 +514,10 @@ void BenchmarkRecorder::set_trace_artifact_path(const std::filesystem::path& csv
 
 void BenchmarkRecorder::annotate_anytime_quality_metrics() {
     if (metrics_.anytime_trace.empty()) {
+        return;
+    }
+
+    if (trace_frontier_snapshots_.size() != metrics_.anytime_trace.size()) {
         return;
     }
 
