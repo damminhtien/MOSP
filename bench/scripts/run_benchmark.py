@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import csv
 import json
 import os
@@ -217,6 +218,14 @@ def optional_path(value: str | Path | None) -> str:
     if isinstance(value, str) and value == "":
         return ""
     return normalize_path(value)
+
+
+def path_relative_to_repo_or_absolute(path: Path, repo_root: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(repo_root.resolve()))
+    except ValueError:
+        return str(resolved)
 
 
 @dataclass(frozen=True)
@@ -749,6 +758,52 @@ def determine_retryable_status(summary_rows: list[dict[str, Any]]) -> bool:
     return any(row["status"] in {"timeout", "crash"} for row in summary_rows)
 
 
+def last_attempt(run_status: dict[str, Any]) -> dict[str, Any]:
+    attempts = run_status.get("attempts")
+    if isinstance(attempts, list) and attempts:
+        return attempts[-1]
+    return {}
+
+
+def run_finished_without_runner_error(run_status: dict[str, Any]) -> bool:
+    status = str(run_status.get("status", ""))
+    if status in {"completed", "skipped"}:
+        return True
+    if status != "timeout":
+        return False
+
+    attempt = last_attempt(run_status)
+    return bool(attempt.get("used_solver_summary")) and not bool(attempt.get("process_timed_out"))
+
+
+def summarize_run_results(run_results: list[dict[str, Any]]) -> tuple[int, str]:
+    status_counts = Counter(str(result.get("status", "unknown")) for result in run_results)
+    clean_timeout_count = 0
+    runner_timeout_count = 0
+
+    for result in run_results:
+        if str(result.get("status", "")) != "timeout":
+            continue
+        if run_finished_without_runner_error(result):
+            clean_timeout_count += 1
+        else:
+            runner_timeout_count += 1
+
+    successful = sum(1 for result in run_results if run_finished_without_runner_error(result))
+    summary_parts = [
+        f"completed={status_counts.get('completed', 0)}",
+        f"timed_out_cleanly={clean_timeout_count}",
+        f"skipped={status_counts.get('skipped', 0)}",
+        f"crash={status_counts.get('crash', 0)}",
+    ]
+    if runner_timeout_count > 0:
+        summary_parts.append(f"runner_timeout={runner_timeout_count}")
+    if status_counts.get("unknown", 0) > 0:
+        summary_parts.append(f"unknown={status_counts['unknown']}")
+
+    return successful, ", ".join(summary_parts)
+
+
 def execute_process_with_monitor(
     command: list[str],
     cwd: Path,
@@ -1070,7 +1125,7 @@ def main() -> int:
     write_json(suite_dir / "environment.json", environment_manifest)
 
     resolved_config = {
-        "config_path": str(config_path.relative_to(repo_root)),
+        "config_path": path_relative_to_repo_or_absolute(config_path, repo_root),
         "suite_id": suite_id,
         "loaded_at_utc": utc_now_iso(),
         "config": config,
@@ -1157,8 +1212,9 @@ def main() -> int:
             print(f"Stopping early due to {run_status['status']} in {spec.run_id}")
             break
 
-    completed = sum(1 for result in run_results if result["status"] == "completed")
-    print(f"Completed {completed}/{len(run_results)} runs")
+    successful, status_summary = summarize_run_results(run_results)
+    print(f"Successful runs: {successful}/{len(run_results)}")
+    print(f"Run status counts: {status_summary}")
     print(f"Suite output: {suite_dir}")
     return 0
 

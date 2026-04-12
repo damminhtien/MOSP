@@ -30,6 +30,14 @@ Runner entrypoint:
 python3 bench/scripts/run_benchmark.py --config bench/configs/timecap.yaml
 ```
 
+Runner console summary semantics:
+
+- `Successful runs: X/Y` counts runs that exited without runner-level errors.
+- Clean solver-side time-capped rows count as successful even when their suite
+  `status` remains `timeout`.
+- `runner_timeout` in the console status breakdown means the harness hit its
+  wall timeout or failed to recover a canonical solver summary row.
+
 The configs use a JSON-compatible YAML subset so they can be parsed by the
 stdlib-only Python runner without external dependencies.
 

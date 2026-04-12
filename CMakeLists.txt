@@ -95,6 +95,10 @@ if(BUILD_TESTING)
         NAME cli_validation_smoke
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/cli_validation_smoke.py $<TARGET_FILE:main>
     )
+    add_test(
+        NAME benchmark_runner_smoke
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/benchmark_runner_smoke.py $<TARGET_FILE:main>
+    )
 
     add_executable(
         ltmoa_frontier_regression
