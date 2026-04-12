@@ -104,11 +104,35 @@ Recommended entry format:
 - Why: the PMR rewrite preserved runtime but did not improve the 2-thread anytime frontier relative to the earlier archive, while the serial `LTMOA_array_superfast` comparison improved strongly.
 - Evidence / related notes: `notes/benchmarks/2026-04-12-pmr-allocators/README.md`, `notes/agent_memory_log.md`
 
+### Add a Swiss-table side index for exact duplicate detection
+- Status: `investigate`
+- Idea: add a Swiss-table-style side index for exact-cost duplicate detection and lightweight frontier metadata lookup, using a packed cost signature or truncated cost vector as the key and a frontier index/offset as the value, while keeping the main frontier as an order-aware dominance structure rather than a hash table.
+- Why: frontier updates currently pay scan cost to reject exact duplicates before dominance checks; a side index could cut duplicate detection cost without pretending that dominance is an exact-key lookup problem.
+- Evidence / related notes: `notes/agent_memory_log.md`, `inc/algorithms/gcl/gcl_fast_array.h`, `inc/algorithms/gcl/gcl_owner_sharded.h`
+
+### Replace remote parallel inbox delivery with an MPMC bulk queue path
+- Status: `investigate`
+- Idea: keep each worker's local heap as a private `std::vector`/heap structure, but route remote label batches through a dedicated MPMC queue with bulk enqueue/dequeue semantics so the owner thread can merge batches into its local frontier in blocks instead of relying on heavier shared structures.
+- Why: `LTMOA_parallel` still looks bottlenecked by remote delivery and publication overhead, and the parallel roadmap should prefer owner-local heaps plus batched inbox delivery over reviving a global concurrent priority queue design.
+- Evidence / related notes: `notes/agent_memory_log.md`, `src/algorithms/ltmoa_parallel.cpp`, `inc/algorithms/ltmoa_parallel.h`
+
+### Prototype a chunked SoA frontier for SIMD-friendly dominance
+- Status: `investigate`
+- Idea: prototype a promoted frontier layout that stays small and simple for tiny skylines, then switches to chunked structure-of-arrays storage with objective-wise contiguous arrays, alive masks, and optional side metadata once the frontier grows large enough to justify vectorized dominance scans.
+- Why: the frontier dominance hot loop is likely paying too much per-entry metadata and branch cost in the current packed-entry layout; a chunked SoA design is the most plausible next step if the repo wants to turn dominance checks into a SIMD-friendly kernel instead of only tuning allocators and containers.
+- Evidence / related notes: `notes/agent_memory_log.md`, `inc/algorithms/gcl/gcl_fast_array.h`, `notes/benchmarks/2026-04-12-pmr-allocators/README.md`
+
 ### Do not treat PMR alone as the next parallel optimization thesis
 - Status: `hold`
 - Idea: do not assume more allocator-only work will be a sufficient optimization direction for `LTMOA_parallel`; future parallel tuning should focus on contention, duplicate work, and target-frontier publication overhead first.
 - Why: the PMR rewrite kept `LTMOA_parallel` runtime near `1.0x` of the earlier archive but did not improve the archived `2`-thread anytime frontier on the NYC `88959 -> 96072` query.
 - Evidence / related notes: `notes/benchmarks/2026-04-12-pmr-allocators/README.md`, `notes/agent_memory_log.md`
+
+### Do not revive a global concurrent-priority-queue center for parallel search
+- Status: `do-not-repeat`
+- Idea: do not move `LTMOA_parallel` back toward a design where remote delivery and scheduling are centered on a shared global concurrent priority queue; if concurrency plumbing changes again, keep the ownership model local-first and batch-oriented.
+- Why: the current evidence points toward owner-local heaps and batched communication as the better direction for shared-memory exact MOSP, while a global concurrent-priority-queue center would reintroduce the exact contention pattern the repo has already been moving away from.
+- Evidence / related notes: `notes/agent_memory_log.md`, `src/algorithms/ltmoa_parallel.cpp`, `inc/algorithms/gcl/gcl_owner_sharded.h`
 
 ### Fix the runner completion banner for time-capped suites
 - Status: `next`

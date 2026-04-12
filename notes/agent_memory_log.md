@@ -296,3 +296,18 @@ Recommended entry format:
 - Do not repeat blindly:
   - do not keep literature tracking as checkbox-only markdown once the reading list feeds implementation work
   - do not start paper-driven implementation passes without reusing the paper ID or repo-hook slug in notes and follow-up artifacts
+
+### Parallel optimization ideas captured as staged roadmap items
+- Task: turn the latest optimization suggestions into explicit roadmap items instead of leaving them only in chat: Swiss-table side indexing for exact duplicates, MPMC bulk remote inbox delivery, and chunked SoA frontier storage for dominance.
+- Files touched: `notes/roadmap.md`, `notes/agent_memory_log.md`
+- Outcome: the roadmap now has separate staged items for three different optimization directions, with boundaries written down so future work does not conflate them. The note also explicitly records that Swiss tables are intended only as side indices, not as the main dominance frontier, and that global concurrent-priority-queue centralization should not be revived as the next parallel direction.
+- Evidence:
+  - `notes/roadmap.md` now includes:
+    - `Add a Swiss-table side index for exact duplicate detection`
+    - `Replace remote parallel inbox delivery with an MPMC bulk queue path`
+    - `Prototype a chunked SoA frontier for SIMD-friendly dominance`
+    - `Do not revive a global concurrent-priority-queue center for parallel search`
+  - the new entries reference current frontier and parallel-core files such as `inc/algorithms/gcl/gcl_fast_array.h`, `inc/algorithms/gcl/gcl_owner_sharded.h`, `inc/algorithms/ltmoa_parallel.h`, and `src/algorithms/ltmoa_parallel.cpp`
+- Do not repeat blindly:
+  - do not describe Swiss tables as a replacement for the dominance frontier itself; they are tracked only as side indices for exact duplicate or metadata lookup
+  - do not collapse remote delivery and local scheduling into one shared concurrent queue design without new evidence that the contention tradeoff is favorable
