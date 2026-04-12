@@ -97,6 +97,16 @@ The codebase now uses one clock for runtime metrics:
 - `BenchmarkClock`
 - backed by `std::chrono::steady_clock`
 
+Two different wall-time views now exist on purpose:
+
+- solver `runtime_sec`
+  Starts when `BenchmarkRecorder` is configured, after solver construction.
+  This is the canonical in-process search runtime used by solver comparisons.
+- runner `wall_runtime_sec`
+  Measured by `bench/scripts/run_benchmark.py` around the whole child process.
+  This includes map load, solver construction, search, benchmark finalization,
+  and process teardown.
+
 The migrated counter meanings are:
 
 - `generated_labels`
@@ -132,8 +142,18 @@ Implemented under `src/algorithms/`:
 - `lazy_ltmoa_array.cpp`
 - `emoa.cpp`
 - `nwmoa.cpp`
+- `hybrid_corridor_pulsea.cpp`
 
 These now share the same benchmark timing and target-frontier recording model.
+
+`HybridCorridorPulseA` is an experimental exact serial variant that keeps the
+same canonical frontier export path as the LTMOA family, but uses:
+
+- reverse-Dijkstra `Heuristic<N>` bounds for corridor pruning
+- a short incumbent seed phase
+- normal global lexicographic best-first OPEN as the primary scheduler
+- a conservative preferred-child spillback burst policy only after the target
+  skyline has at least two accepted points
 
 ### Parallel solvers
 
@@ -253,6 +273,7 @@ wraps `main` and standardizes:
 - environment capture
 - result placement
 - suite-level summary aggregation
+- wrapper-level wall-runtime capture
 - wrapper-level peak RSS capture
 - timeout and crash classification
 

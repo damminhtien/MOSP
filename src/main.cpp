@@ -10,6 +10,7 @@
 #include"algorithms/ltmoa_array_superfast.h"
 #include"algorithms/ltmoa_array_superfast_anytime.h"
 #include"algorithms/ltmoa_array_superfast_lb.h"
+#include"algorithms/hybrid_corridor_pulsea.h"
 #include"algorithms/ltmoa_parallel.h"
 #include"algorithms/lazy_ltmoa_array.h"
 #include"algorithms/emoa.h"
@@ -37,7 +38,7 @@ bool option_was_explicit(const po::variables_map& vm, const char* option_name) {
 }
 
 bool is_supported_algorithm(const string& algorithm) {
-    static const std::array<std::string_view, 13> supported = {
+    static const std::array<std::string_view, 14> supported = {
         "SOPMOA",
         "SOPMOA_relaxed",
         "SOPMOA_bucket",
@@ -47,6 +48,7 @@ bool is_supported_algorithm(const string& algorithm) {
         "LTMOA_array_superfast",
         "LTMOA_array_superfast_anytime",
         "LTMOA_array_superfast_lb",
+        "HybridCorridorPulseA",
         "LTMOA_parallel",
         "LazyLTMOA_array",
         "EMOA",
@@ -241,6 +243,8 @@ void single_run(
         solver = get_LTMOA_array_superfast_anytime_solver(graph, inv_graph, start_node, target_node);
     } else if (algorithm == "LTMOA_array_superfast_lb") {
         solver = get_LTMOA_array_superfast_lb_solver(graph, inv_graph, start_node, target_node);
+    } else if (algorithm == "HybridCorridorPulseA") {
+        solver = get_HybridCorridorPulseA_solver(graph, inv_graph, start_node, target_node);
     } else if (algorithm == "LTMOA_parallel") {
         int num_threads = vm["numthreads"].as<int>();
         solver = get_LTMOA_parallel_solver(graph, inv_graph, start_node, target_node, num_threads);
@@ -434,7 +438,7 @@ int main(int argc, char* argv[]) {
         ("from", po::value<int>()->default_value(0), "start from the i-th line of the scenario file")
         ("to", po::value<int>()->default_value(INT_MAX), "up to the i-th line of the scenario file")
         ("map,m",po::value< std::vector<string> >(&cost_files)->multitoken(), "files for edge weight")
-        ("algorithm,a", po::value<std::string>()->default_value("SOPMOA"), "solvers [SOPMOA, SOPMOA_relaxed, SOPMOA_bucket, LTMOA, LazyLTMOA, LTMOA_array, LTMOA_array_superfast, LTMOA_array_superfast_anytime, LTMOA_array_superfast_lb, LTMOA_parallel, LazyLTMOA_array, EMOA, NWMOA]")
+        ("algorithm,a", po::value<std::string>()->default_value("SOPMOA"), "solvers [SOPMOA, SOPMOA_relaxed, SOPMOA_bucket, LTMOA, LazyLTMOA, LTMOA_array, LTMOA_array_superfast, LTMOA_array_superfast_anytime, LTMOA_array_superfast_lb, HybridCorridorPulseA, LTMOA_parallel, LazyLTMOA_array, EMOA, NWMOA]")
         ("budget-sec", po::value<double>()->default_value(300.0), "benchmark budget in seconds")
         ("summary-output", po::value<std::string>()->default_value(""), "summary CSV path")
         ("frontier-output-dir", po::value<std::string>()->default_value(""), "directory for final frontier CSV artifacts")

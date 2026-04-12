@@ -6,6 +6,7 @@
 
 #include "algorithms/abstract_solver.h"
 #include "algorithms/emoa.h"
+#include "algorithms/hybrid_corridor_pulsea.h"
 #include "algorithms/ltmoa.h"
 #include "algorithms/sopmoa.h"
 #include "algorithms/sopmoa_relaxed.h"
@@ -460,6 +461,9 @@ void run_correctness_matrix_subcase(const std::filesystem::path& root) {
     const std::vector<SolverConfig> solver_configs = {
         {"LTMOA_t1", 1, 1, true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph, size_t start, size_t target) {
             return get_LTMOA_solver(graph, inv_graph, start, target);
+        }},
+        {"HybridCorridorPulseA_t1", 1, 1, true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph, size_t start, size_t target) {
+            return get_HybridCorridorPulseA_solver(graph, inv_graph, start, target);
         }},
         {"EMOA_t1", 1, 1, true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph, size_t start, size_t target) {
             return get_EMOA_solver(graph, inv_graph, start, target);

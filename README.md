@@ -48,6 +48,7 @@ The repository is currently aligned to eight completed stages:
 | `LTMOA_array_superfast` | serial exact | packed-array experimental baseline |
 | `LTMOA_array_superfast_anytime` | serial experimental | incumbent-first scheduling variant |
 | `LTMOA_array_superfast_lb` | serial experimental | stronger-bound / warm-start variant |
+| `HybridCorridorPulseA` | serial experimental | heuristic corridor search with conservative preferred-child spillback scheduling |
 | `LTMOA_parallel` | parallel exact | owner-sharded LTMOA-style parallel core |
 | `LazyLTMOA_array` | serial exact | migrated |
 | `EMOA` | serial exact | migrated |
@@ -330,6 +331,7 @@ query execution with wrapper metadata and canonical artifact paths, including:
 - `status`
 - `completed`
 - `runtime_sec`
+- `wall_runtime_sec`
 - `generated_labels`
 - `expanded_labels`
 - `pruned_by_target`
@@ -345,8 +347,9 @@ query execution with wrapper metadata and canonical artifact paths, including:
 - `stdout_file`
 - `stderr_file`
 
-`peak_rss_mb` is currently captured by the runner on macOS/Linux from the
-process wrapper, not from the in-process C++ metrics layer.
+`runtime_sec` is the solver-reported benchmark clock from the C++ runtime.
+`wall_runtime_sec` and `peak_rss_mb` are captured by the external runner
+wrapper, so they include process-level setup and teardown around the solver.
 
 Example successful suite output from this phase:
 

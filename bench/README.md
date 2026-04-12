@@ -189,6 +189,7 @@ stable fields:
 - `completed`
 - `exit_code`
 - `runtime_sec`
+- `wall_runtime_sec`
 - `generated_labels`
 - `expanded_labels`
 - `pruned_by_target`
@@ -212,9 +213,9 @@ Status values are normalized at the runner layer:
 - `build_error`
 - `skipped`
 
-`peak_rss_mb` is currently measured by the runner with an external process
-monitor based on `ps`, which works for the local macOS/Linux workflow. It is
-not yet sourced from the C++ runtime itself.
+`runtime_sec` is the solver-reported benchmark clock from the C++ runtime.
+`wall_runtime_sec` and `peak_rss_mb` are runner-level wrapper metrics, so they
+include process-level setup and teardown around the solver.
 
 ## Aggregate Commands
 

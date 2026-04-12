@@ -61,6 +61,13 @@ Size of the target frontier snapshot associated with that trace sample.
 Wall-clock runtime measured by `BenchmarkClock`, which is backed by
 `std::chrono::steady_clock`.
 
+### `wall_runtime_sec`
+
+End-to-end process wall time measured by the Python benchmark runner.
+
+This includes process startup, solver construction, search, benchmark
+finalization, and process teardown.
+
 ### `time_to_first_solution_sec`
 
 Also called `TTFS`.

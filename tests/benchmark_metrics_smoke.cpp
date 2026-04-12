@@ -13,10 +13,11 @@
 #include "algorithms/lazy_ltmoa_array.h"
 #include "algorithms/ltmoa.h"
 #include "algorithms/ltmoa_array.h"
-#include "algorithms/ltmoa_parallel.h"
+#include "algorithms/hybrid_corridor_pulsea.h"
 #include "algorithms/ltmoa_array_superfast.h"
 #include "algorithms/ltmoa_array_superfast_anytime.h"
 #include "algorithms/ltmoa_array_superfast_lb.h"
+#include "algorithms/ltmoa_parallel.h"
 #include "algorithms/nwmoa.h"
 #include "algorithms/sopmoa.h"
 #include "algorithms/sopmoa_bucket.h"
@@ -516,6 +517,7 @@ void run_solver_summary_only_subcase() {
         {"ltmoa_array_superfast_summary_only", [](AdjacencyMatrix& graph_ref, AdjacencyMatrix& inv_graph_ref) { return get_LTMOA_array_superfast_solver(graph_ref, inv_graph_ref, 0, 3); }},
         {"ltmoa_array_superfast_anytime_summary_only", [](AdjacencyMatrix& graph_ref, AdjacencyMatrix& inv_graph_ref) { return get_LTMOA_array_superfast_anytime_solver(graph_ref, inv_graph_ref, 0, 3); }},
         {"ltmoa_array_superfast_lb_summary_only", [](AdjacencyMatrix& graph_ref, AdjacencyMatrix& inv_graph_ref) { return get_LTMOA_array_superfast_lb_solver(graph_ref, inv_graph_ref, 0, 3); }},
+        {"hybrid_corridor_pulsea_summary_only", [](AdjacencyMatrix& graph_ref, AdjacencyMatrix& inv_graph_ref) { return get_HybridCorridorPulseA_solver(graph_ref, inv_graph_ref, 0, 3); }},
         {"ltmoa_parallel_summary_only", [](AdjacencyMatrix& graph_ref, AdjacencyMatrix& inv_graph_ref) { return get_LTMOA_parallel_solver(graph_ref, inv_graph_ref, 0, 3, 2); }},
     };
 
@@ -558,6 +560,7 @@ void run_solver_matrix_subcase(const std::filesystem::path& root) {
         {"ltmoa_array_superfast", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_array_superfast_solver(graph, inv_graph, 0, 3); }},
         {"ltmoa_array_superfast_anytime", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_array_superfast_anytime_solver(graph, inv_graph, 0, 3); }},
         {"ltmoa_array_superfast_lb", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_array_superfast_lb_solver(graph, inv_graph, 0, 3); }},
+        {"hybrid_corridor_pulsea", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_HybridCorridorPulseA_solver(graph, inv_graph, 0, 3); }},
         {"ltmoa_parallel", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LTMOA_parallel_solver(graph, inv_graph, 0, 3, 2); }},
         {"lazy_ltmoa_array", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_LazyLTMOA_array_solver(graph, inv_graph, 0, 3); }},
         {"emoa", true, [](AdjacencyMatrix& graph, AdjacencyMatrix& inv_graph) { return get_EMOA_solver(graph, inv_graph, 0, 3); }},

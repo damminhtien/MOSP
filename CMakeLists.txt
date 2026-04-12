@@ -111,4 +111,16 @@ if(BUILD_TESTING)
         target_link_libraries(ltmoa_frontier_regression PRIVATE OpenMP::OpenMP_CXX)
     endif()
     add_test(NAME ltmoa_frontier_regression COMMAND ltmoa_frontier_regression)
+
+    add_executable(
+        hybrid_corridor_pulsea_regression
+        tests/hybrid_corridor_pulsea_regression.cpp
+        ${SOURCES}
+    )
+    target_include_directories(hybrid_corridor_pulsea_regression PRIVATE inc)
+    target_link_libraries(hybrid_corridor_pulsea_regression PRIVATE ${Boost_LIBRARIES} TBB::tbb)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(hybrid_corridor_pulsea_regression PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+    add_test(NAME hybrid_corridor_pulsea_regression COMMAND hybrid_corridor_pulsea_regression)
 endif()

@@ -311,3 +311,73 @@ Recommended entry format:
 - Do not repeat blindly:
   - do not describe Swiss tables as a replacement for the dominance frontier itself; they are tracked only as side indices for exact duplicate or metadata lookup
   - do not collapse remote delivery and local scheduling into one shared concurrent queue design without new evidence that the contention tradeoff is favorable
+
+### Exact-first `HybridCorridorPulseA` prototype
+- Task: implement a new serial exact solver that combines a short seed phase, lower-bound corridor gating, dimensionality-reduced node dominance, and iterative burst spillback scheduling, then test it and benchmark it on the stable NYC query.
+- Files touched: `inc/algorithms/hybrid_corridor_pulsea.h`, `src/algorithms/hybrid_corridor_pulsea.cpp`, `src/main.cpp`, `tests/benchmark_metrics_smoke.cpp`, `tests/correctness_harness.cpp`, `tests/hybrid_corridor_pulsea_regression.cpp`, `CMakeLists.txt`, `bench/configs/nyc_hybrid_corridor_pulsea.yaml`, `README.md`, `notes/benchmarks/2026-04-12-hybrid-corridor-pulsea/README.md`, `notes/benchmarks/2026-04-12-hybrid-corridor-pulsea/nyc_hybrid_corridor_pulsea_5x_summary.csv`, `notes/roadmap.md`, `notes/agent_memory_log.md`
+- Outcome: the prototype passed exactness, instrumentation, CLI, and targeted regression tests, and the benchmark suite completed cleanly. On the archived NYC `88959 -> 96072` query, however, it was not competitive with `LTMOA_array_superfast`: runtime stayed near parity, but median frontier size was only `0.359x`, `0.376x`, `0.443x`, and `0.520x` of `LTMOA_array_superfast` at `0.5/1/2/5s`. It did outperform `LTMOA_array_superfast_lb`, so the design is not useless, but it is a no-go for serial mainline promotion on current evidence.
+- Evidence:
+  - validation passed:
+    - `cmake --build Release -j4`
+    - `ctest --test-dir Release --output-on-failure -R 'correctness_harness|benchmark_metrics_smoke|hybrid_corridor_pulsea_regression|cli_validation_smoke|ltmoa_frontier_regression'`
+  - benchmark suite:
+    - `python3 bench/scripts/run_benchmark.py --config bench/configs/nyc_hybrid_corridor_pulsea.yaml --suite-id nyc_hybrid_corridor_pulsea_20260412`
+    - runner result: `Successful runs: 60/60`
+  - median anytime frontier on NYC:
+    - `0.5s`: `HybridCorridorPulseA=184`, `LTMOA_array_superfast=512`, `LTMOA_array_superfast_lb=112`
+    - `1.0s`: `HybridCorridorPulseA=262`, `LTMOA_array_superfast=696`, `LTMOA_array_superfast_lb=154`
+    - `2.0s`: `HybridCorridorPulseA=401`, `LTMOA_array_superfast=906`, `LTMOA_array_superfast_lb=218`
+    - `5.0s`: `HybridCorridorPulseA=691`, `LTMOA_array_superfast=1328`, `LTMOA_array_superfast_lb=361`
+  - median first-solution time vs `LTMOA_array_superfast` was slower at every budget:
+    - `1.844x`, `2.019x`, `2.704x`, `1.944x`
+  - runner-observed wall runtime for the hybrid stayed well above the solver-side budget even in summary-only mode:
+    - `0.5s`: `4.38s`
+    - `1.0s`: `5.06s`
+    - `2.0s`: `6.25s`
+    - `5.0s`: `8.91s`
+- Do not repeat blindly:
+  - do not treat the hybrid as a likely serial baseline upgrade just because it combines strong ingredients on paper; on the current NYC query the exact-first implementation is materially worse than `LTMOA_array_superfast`
+  - do not spend the next tuning pass on cosmetic burst-policy adjustments before explaining the large post-budget wall-time overhead
+
+### Repo-local install of `multiobjective-search-inventor`
+- Task: vendor the uploaded `skill (1).zip` into the repository as a repo-local skill.
+- Files touched: `skills/multiobjective-search-inventor/SKILL.md`, `skills/multiobjective-search-inventor/references/paper-roadmap.md`, `skills/multiobjective-search-inventor/references/web-scouting.md`, `skills/multiobjective-search-inventor/references/dominance-idea-catalog.md`, `skills/multiobjective-search-inventor/references/algorithm-patterns.md`, `skills/multiobjective-search-inventor/references/novelty-checklist.md`, `skills/multiobjective-search-inventor/references/output-templates.md`, `skills/multiobjective-search-inventor/references/uploaded-checklist.md`, `skills/multiobjective-search-inventor/agents/openai.yaml`, `notes/agent_memory_log.md`, `notes/roadmap.md`
+- Outcome: the repo now contains a full local copy of the `multiobjective-search-inventor` skill under `skills/`, following the same vendored-skill convention already used for `mosp-cpp-performance-engineer`.
+- Evidence:
+  - installed path: `skills/multiobjective-search-inventor/`
+  - archive source: `/Users/macbook/Downloads/skill (1).zip`
+  - verification passed with a recursive content comparison between the installed directory and a fresh unzip of the source archive
+- Do not repeat blindly:
+  - do not assume the repo-local copy will stay synchronized with the original zip or any future global install automatically
+  - do not overwrite an existing repo-local skill directory without checking whether the repo copy has diverged intentionally
+
+### `HybridCorridorPulseA` repair pass with runner wall time surfaced
+- Task: repair the experimental hybrid solver by removing the expensive `LowerBoundOracle` startup path, shrinking burst scheduling to a conservative preferred-child spillback policy, surfacing `wall_runtime_sec` in runner summaries, and rerunning the broader NYC repair gate.
+- Files touched: `inc/algorithms/hybrid_corridor_pulsea.h`, `src/algorithms/hybrid_corridor_pulsea.cpp`, `bench/scripts/run_benchmark.py`, `tests/benchmark_runner_smoke.py`, `tests/hybrid_corridor_pulsea_regression.cpp`, `bench/configs/nyc_hybrid_corridor_pulsea_repair.yaml`, `notes/benchmarks/2026-04-12-hybrid-corridor-pulsea-repair/README.md`, `notes/benchmarks/2026-04-12-hybrid-corridor-pulsea-repair/nyc_hybrid_corridor_pulsea_repair_5x_summary.csv`, `ARCHITECTURE.md`, `README.md`, `bench/README.md`, `docs/metrics-definition.md`, `notes/agent_memory_log.md`, `notes/roadmap.md`
+- Outcome: the repaired hybrid stayed exact and fixed the main wall-time problem. On the broader NYC repair gate it beat `LTMOA_array_superfast` under the agreed query-level acceptance rule on `4/4` non-trivial queries. On the original hard query `88959 -> 96072`, median frontier ratios vs `LTMOA_array_superfast` improved from the archived v1 loss (`0.359x`, `0.376x`, `0.443x`, `0.520x`) to a repaired win (`1.627x`, `1.565x`, `1.562x`, `1.411x`) at `0.5 / 1 / 2 / 5s`.
+- Evidence:
+  - validation passed:
+    - `cmake --build Release -j4`
+    - `ctest --test-dir Release --output-on-failure -R 'correctness_harness|benchmark_metrics_smoke|hybrid_corridor_pulsea_regression|benchmark_runner_smoke|cli_validation_smoke'`
+  - zero-budget startup probe on the hard NYC query:
+    - `HybridCorridorPulseA`: `2.25s`
+    - `LTMOA_array_superfast`: `2.21s`
+    - `LTMOA_array_superfast_lb`: `4.39s`
+  - broader suite:
+    - `python3 bench/scripts/run_benchmark.py --config bench/configs/nyc_hybrid_corridor_pulsea_repair.yaml --suite-id nyc_hybrid_corridor_pulsea_repair_20260412`
+    - runner result: `Successful runs: 230/240`
+    - clean completed or solver-timeout rows: `HybridCorridorPulseA` and `LTMOA_array_superfast` clean across the suite; the `10` runner timeouts were all `LTMOA_array_superfast_lb`
+  - query-level gate result:
+    - `single_88959_96072`: win
+    - `query3_6`: win
+    - `query3_1`: win
+    - `query3_2`: win
+  - runner wall time on the archived hard query improved sharply vs the archived v1 hybrid:
+    - `0.5s`: `2.31s` vs `4.38s` (`0.528x`)
+    - `1.0s`: `2.97s` vs `5.06s` (`0.588x`)
+    - `2.0s`: `3.91s` vs `6.25s` (`0.626x`)
+    - `5.0s`: `7.66s` vs `8.91s` (`0.859x`)
+- Do not repeat blindly:
+  - do not put the full landmark `LowerBoundOracle` back on the hybrid hot path unless a future benchmark proves the extra startup cost is repaid
+  - do not treat the repaired hybrid as ready for mainline promotion yet; its consistent remaining weakness is `time_to_first_solution_sec`, not frontier size
+  - do not hide runner wall time behind `status.json` again now that the suite summary has a first-class `wall_runtime_sec` column

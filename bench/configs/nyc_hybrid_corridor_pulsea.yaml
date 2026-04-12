@@ -1,0 +1,45 @@
+{
+  "config_version": "benchmark_config_v1",
+  "mode": "time_capped",
+  "description": "NYC 3-objective time-capped comparison for HybridCorridorPulseA against LTMOA_array_superfast baselines on query 88959 -> 96072.",
+  "build_dir": "Release",
+  "binary": "./Release/main",
+  "build": {
+    "enabled": false,
+    "command": ["/usr/local/bin/cmake", "--build", "Release", "-j4"]
+  },
+  "execution": {
+    "kind": "per_query"
+  },
+  "solvers": [
+    {
+      "name": "LTMOA_array_superfast",
+      "thread_counts": [1]
+    },
+    {
+      "name": "LTMOA_array_superfast_lb",
+      "thread_counts": [1]
+    },
+    {
+      "name": "HybridCorridorPulseA",
+      "thread_counts": [1]
+    }
+  ],
+  "datasets": ["nyc_3obj"],
+  "query_sets": ["nyc_88959_96072"],
+  "budgets_sec": [0.5, 1.0, 2.0, 5.0],
+  "repeat_count": 5,
+  "trace_interval_ms": 0,
+  "runtime_control": {
+    "timeout_grace_sec": 5.0
+  },
+  "failure_policy": {
+    "mode": "continue_on_error",
+    "max_retries": 0
+  },
+  "output": {
+    "root": "bench/results",
+    "export_frontier": false,
+    "export_trace": false
+  }
+}

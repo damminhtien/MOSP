@@ -134,6 +134,18 @@ Recommended entry format:
 - Why: the current evidence points toward owner-local heaps and batched communication as the better direction for shared-memory exact MOSP, while a global concurrent-priority-queue center would reintroduce the exact contention pattern the repo has already been moving away from.
 - Evidence / related notes: `notes/agent_memory_log.md`, `src/algorithms/ltmoa_parallel.cpp`, `inc/algorithms/gcl/gcl_owner_sharded.h`
 
+### Keep `HybridCorridorPulseA` archived, not promoted
+- Status: `hold`
+- Idea: keep `HybridCorridorPulseA` as an archived exact serial experiment and do not fold it into the main LTMOA line unless a future revision materially improves the NYC anytime frontier relative to `LTMOA_array_superfast`.
+- Why: the first exact-first prototype was exact and benchmark-clean, but on the stable NYC `88959 -> 96072` query it reached only `0.359x`, `0.376x`, `0.443x`, and `0.520x` of `LTMOA_array_superfast`'s median frontier at `0.5/1/2/5s`.
+- Evidence / related notes: `notes/benchmarks/2026-04-12-hybrid-corridor-pulsea/README.md`, `notes/agent_memory_log.md`
+
+### If the hybrid corridor line is revisited, target shutdown overhead before new tuning
+- Status: `investigate`
+- Idea: if `HybridCorridorPulseA` is revisited, profile and reduce the post-budget wall-time overhead before attempting more corridor or burst-policy tuning.
+- Why: the prototype respected solver-side `runtime_sec` budgets, but the runner still observed median wall runtimes of `4.38s`, `5.06s`, `6.25s`, and `8.91s` at `0.5/1/2/5s`, which is too expensive for a summary-only serial suite.
+- Evidence / related notes: `notes/benchmarks/2026-04-12-hybrid-corridor-pulsea/README.md`, `bench/results/nyc_hybrid_corridor_pulsea_20260412/run_results.json`
+
 ### Fix the runner completion banner for time-capped suites
 - Status: `next`
 - Idea: update `bench/scripts/run_benchmark.py` so summary reporting distinguishes clean anytime `status=timeout` rows from real failed runs.
@@ -145,3 +157,27 @@ Recommended entry format:
 - Idea: if the runner status accounting changes again, add one more smoke case that mixes a clean solver timeout with a true runner timeout or crash so the console summary breakdown stays trustworthy.
 - Why: the clean-timeout banner bug is now fixed, but the next likely regression surface is mixed suites where solver-level `timeout` and runner-level timeout need to stay visually distinct.
 - Evidence / related notes: `tests/benchmark_runner_smoke.py`, `notes/agent_memory_log.md`
+
+### Keep vendored repo-local skills discoverable and intentional
+- Status: `hold`
+- Idea: if more skills are vendored into `skills/`, keep a short note in repo memory about the source archive or source repo and avoid letting the repo-local copies drift silently from whatever external source they were installed from.
+- Why: the repo now has at least two vendored local skills, including `mosp-cpp-performance-engineer` and `multiobjective-search-inventor`, so future updates can easily diverge unless the source-of-truth is recorded explicitly.
+- Evidence / related notes: `notes/agent_memory_log.md`, `skills/mosp-cpp-performance-engineer/`, `skills/multiobjective-search-inventor/`
+
+### Keep the repaired hybrid experimental until TTFS improves
+- Status: `investigate`
+- Idea: keep `HybridCorridorPulseA` as an experimental solver line for now, and treat `time_to_first_solution_sec` as the next primary bottleneck instead of startup wall time or frontier size.
+- Why: the repair gate now passed on `4/4` NYC queries and fixed the big startup wall issue, but the hybrid still trails `LTMOA_array_superfast` by roughly `2.1x` to `3.3x` on early-budget TTFS.
+- Evidence / related notes: `notes/benchmarks/2026-04-12-hybrid-corridor-pulsea-repair/README.md`, `notes/agent_memory_log.md`
+
+### Do not reintroduce the heavy landmark oracle into the hybrid by default
+- Status: `do-not-repeat`
+- Idea: do not move `HybridCorridorPulseA` back to the full `LowerBoundOracle` startup path unless a future benchmark shows a clear net gain over the cheaper reverse-Dijkstra heuristic.
+- Why: the repair pass showed that most of the prototype's large runner wall overhead came from the heavy bound construction, and the cheaper heuristic version still beat `LTMOA_array_superfast` on the broader NYC gate.
+- Evidence / related notes: `notes/benchmarks/2026-04-12-hybrid-corridor-pulsea-repair/README.md`, `notes/agent_memory_log.md`
+
+### Separate heavy-bound comparison lines from the main repair gate
+- Status: `hold`
+- Idea: if future hybrid or LTMOA benchmark suites include `LTMOA_array_superfast_lb`, either give that branch a larger timeout grace or keep it out of the primary accept/reject gate.
+- Why: the repaired hybrid gate finished cleanly for `HybridCorridorPulseA` and `LTMOA_array_superfast`, but the fixed `budget + 5s` grace still produced `10` runner-level timeouts in the heavy-bound `_lb` branch.
+- Evidence / related notes: `bench/results/nyc_hybrid_corridor_pulsea_repair_20260412/run_results.json`, `notes/agent_memory_log.md`
