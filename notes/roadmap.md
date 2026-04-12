@@ -70,9 +70,15 @@ Recommended entry format:
 
 ### Turn the MOSP / MOA* paper checklist into a phased implementation backlog
 - Status: `next`
-- Idea: use `notes/paper_reading_roadmap_mosp_moa.md` as the canonical reading roadmap, then convert one paper cluster at a time into concrete repo changes: exact-core papers first, surveys/theory second, then OR-nearby and engineering papers as needed.
-- Why: the literature list is now large enough that ad hoc reading will waste time; the repo needs a stable “read first, implement later” sequence aligned with the actual MOSP research arc.
+- Idea: use `notes/paper_reading_roadmap_mosp_moa.md` as the canonical reading roadmap, with explicit paper IDs, per-paper status fields, and `Repo hook` slugs that can be attached to issues, benchmarks, and implementation passes one cluster at a time.
+- Why: the literature list is now large enough that ad hoc reading will waste time; the repo needs a stable “read first, implement later” sequence aligned with the actual MOSP research arc, plus a mapping layer from papers to concrete implementation work.
 - Evidence / related notes: `notes/paper_reading_roadmap_mosp_moa.md`, `skills/mosp-cpp-performance-engineer/SKILL.md`
+
+### Keep paper tracking structured instead of relying on checkboxes alone
+- Status: `next`
+- Idea: whenever a paper is touched, update its status code in `notes/paper_reading_roadmap_mosp_moa.md` and reuse its `Repo hook` slug in the matching benchmark note, implementation branch, or memory-log entry.
+- Why: plain checkboxes are too weak once multiple paper clusters are active; the repo needs a lightweight but explicit bridge between reading progress and implementation work.
+- Evidence / related notes: `notes/paper_reading_roadmap_mosp_moa.md`, `notes/agent_memory_log.md`
 
 ### Decide whether repo-local skills should become the preferred project convention
 - Status: `hold`

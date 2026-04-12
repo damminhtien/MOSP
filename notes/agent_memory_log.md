@@ -283,3 +283,16 @@ Recommended entry format:
 - Do not repeat blindly:
   - do not treat every suite-level `timeout` as a runner failure; clean solver-side budget timeouts are now a first-class successful outcome in runner console summaries
   - do not reintroduce full frontier snapshot capture on every `SOPMOA_relaxed` target acceptance when `trace_interval_ms=0`; that was the expensive path behind the earlier handoff/finalization issue
+
+### MOSP / MOA* paper tracker upgraded with explicit statuses and repo hooks
+- Task: fix the paper-reading roadmap so it tracks more than checkbox state and can map each paper cluster to concrete implementation or benchmark work later.
+- Files touched: `notes/paper_reading_roadmap_mosp_moa.md`, `notes/roadmap.md`, `notes/agent_memory_log.md`
+- Outcome: the reading note now has stable paper IDs, explicit per-paper `Status` fields, `Repo hook` slugs for implementation linkage, and a cluster-to-implementation mapping table. This makes the roadmap usable both as a reading tracker and as a staging area for future issue or implementation mapping.
+- Evidence:
+  - `notes/paper_reading_roadmap_mosp_moa.md` now defines status codes `unread`, `queued`, `reading`, `skimmed`, `notes-written`, `implemented`, and `parked`
+  - every paper row now has a stable ID such as `C1-P04` and a repo hook such as `impl-ltmoa-lazy-dominance`
+  - the note now has an explicit cluster mapping table from `C1` through `C7`
+  - `notes/roadmap.md` now tells future work to reuse paper IDs and repo-hook slugs when creating benchmark notes, implementation passes, or issue-style tasks
+- Do not repeat blindly:
+  - do not keep literature tracking as checkbox-only markdown once the reading list feeds implementation work
+  - do not start paper-driven implementation passes without reusing the paper ID or repo-hook slug in notes and follow-up artifacts
