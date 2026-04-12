@@ -1,0 +1,19 @@
+{
+  "manifest_version": "query_set_manifest_v1",
+  "query_set_id": "nyc_88959_96072",
+  "dataset_id": "nyc_3obj",
+  "description": "Focused NYC benchmark query used by the archived local notes and reliable reruns.",
+  "source": {
+    "type": "note_archive",
+    "path": "notes/benchmarks/2026-04-11-nyc-reliable/README.md"
+  },
+  "queries": [
+    {
+      "query_id": "single_88959_96072",
+      "start": 88959,
+      "target": 96072,
+      "difficulty": "hard",
+      "source": "notes/benchmarks/2026-04-11-nyc-reliable/README.md"
+    }
+  ]
+}
